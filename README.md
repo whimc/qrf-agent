@@ -4,7 +4,8 @@ Overworld-Agent is a Minecraft plugin to create and define agent behavior. To te
 To select the agent right click on the desired agent and to start a conversation with your agent also right click on them. 
 To select a dialogue option must click enter then left click on the desired option.
 
-Alternatively you can use `/agents spawn <skin name> <agent name>` to spawn an agent (described below) or use the `/agent chat` command to talk to a disembodied agent (described below).
+Alternatively you can use `/agents spawn [entity type] <skin name> <agent name>` to spawn an agent (described below) or use the `/agent chat` command to talk to a disembodied agent (described below).
+If the entity type is omitted, it defaults to `player`. For non-player entity types (animals), no skin is required.
 
 To spawn a builder agent use `/agents rebuilderspawn` and interact with it using the same method as described previously with the guide agent.
 
@@ -43,7 +44,9 @@ skins:
 ### Admin Commands
 | Command                                                      | Description                                                                                                                                      |
 |--------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
-| `/agents spawn <skin name> <agent name>`                     | Spawn an agent with the specified skin and name that follows the student that spawned the agent and when right clicked prompts for a discussion. |
+| `/agents spawn <skin name> <agent name>`                     | Spawn a **player** agent with the specified skin and name that follows the student that spawned the agent and when right clicked prompts for a discussion. |
+| `/agents spawn player <skin name> <agent name>`              | Same as above, with the entity type explicitly set to `player`. |
+| `/agents spawn <entity type> <agent name>`                   | Spawn a **non-player** (animal) agent with the specified entity type and name. No skin is required. |
 | `/agents reactivate <player name or all>`                    | Respawns an agent for the specified player or all players on the server when argument is all.                                                    |
 | `/agents despawn <player name or all>`                       | Despawns an agent for the specified player or all players on the server when argument is all.                                                    |
 | `/agents destroy <player name or all>`                       | Destroys an agent for the specified player or all players on the server when argument is all.                                                    |
