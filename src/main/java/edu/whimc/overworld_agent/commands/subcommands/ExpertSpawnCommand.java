@@ -2,6 +2,8 @@ package edu.whimc.overworld_agent.commands.subcommands;
 
 import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.commands.AbstractSubCommand;
+import edu.whimc.overworld_agent.utils.AgentEntityTypes;
+import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import edu.whimc.overworld_agent.traits.SpawnExpertTrait;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
@@ -30,15 +32,7 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
 
 
     private final String COMMAND = "expert";
-    private static final List<String> ANIMAL_ENTITY_NAMES = Arrays.stream(EntityType.values())
-            .filter(t -> t != EntityType.UNKNOWN && t.isAlive())
-            .filter(t -> {
-                Class<?> c = t.getEntityClass();
-                return c != null && Animals.class.isAssignableFrom(c);
-            })
-            .map(e -> e.name().toLowerCase(Locale.ROOT))
-            .sorted()
-            .collect(Collectors.toList());
+    private static final List<String> ANIMAL_ENTITY_NAMES = AgentEntityTypes.animalNamesLowercaseSorted();
 
     public ExpertSpawnCommand(OverworldAgent plugin, String baseCommand, String subCommand){
         super(plugin, baseCommand, subCommand);
@@ -134,6 +128,7 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
             trait.setPlayer(player);
             trait.setInputType(true);
             npc.addTrait(trait);
+            npc.addTrait(new AgentPermanentFlyingTrait());
 
             if (entityType == EntityType.PLAYER) {
                 //Set NPC skin by grabbing values from config

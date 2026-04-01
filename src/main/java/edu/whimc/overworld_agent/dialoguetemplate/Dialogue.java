@@ -4,9 +4,11 @@ package edu.whimc.overworld_agent.dialoguetemplate;
 
 
 import edu.whimc.overworld_agent.OverworldAgent;
+import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import edu.whimc.overworld_agent.dialoguetemplate.models.Chatbot;
 import edu.whimc.overworld_agent.dialoguetemplate.models.DialoguePrompt;
 
+import edu.whimc.overworld_agent.utils.AgentEntityTypes;
 import edu.whimc.overworld_agent.utils.Utils;
 import edu.whimc.sciencetools.models.sciencetool.ScienceTool;
 import edu.whimc.sciencetools.models.sciencetool.ScienceToolMeasureEvent;
@@ -17,7 +19,6 @@ import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
 import net.citizensnpcs.trait.FollowTrait;
 import net.citizensnpcs.trait.SkinTrait;
-import net.citizensnpcs.api.trait.trait.MobType;
 import net.md_5.bungee.api.chat.ComponentBuilder;
 import net.md_5.bungee.api.chat.HoverEvent;
 import net.md_5.bungee.api.chat.TextComponent;
@@ -415,7 +416,7 @@ public class Dialogue implements Listener {
                         "&aClick here to change what I am",
                         l -> {
                             Utils.msgNoPrefix(player, "&lClick what type you want me to be:", "");
-                            for (EntityType type : Arrays.asList(EntityType.PLAYER, EntityType.SHEEP, EntityType.AXOLOTL)) {
+                            for (EntityType type : AgentEntityTypes.selectableAgentTypes()) {
                                 String label = StringUtils.capitalize(type.name().toLowerCase());
                                 sendComponent(
                                         player,
@@ -429,12 +430,24 @@ public class Dialogue implements Listener {
                                                 return;
                                             }
 
-                                            Location respawnAt = npc.getStoredLocation() != null ? npc.getStoredLocation() : player.getLocation();
-                                            if (npc.isSpawned()) {
-                                                npc.despawn();
+                                            Location respawnAt;
+                                            if (npc.isSpawned() && npc.getEntity() != null) {
+                                                respawnAt = npc.getEntity().getLocation().clone();
+                                            } else if (npc.getStoredLocation() != null) {
+                                                respawnAt = npc.getStoredLocation().clone();
+                                            } else {
+                                                respawnAt = player.getLocation().clone();
                                             }
-                                            npc.getOrAddTrait(MobType.class).setType(type);
-                                            npc.spawn(respawnAt);
+
+                                            if (type != EntityType.PLAYER && npc.hasTrait(SkinTrait.class)) {
+                                                npc.removeTrait(SkinTrait.class);
+                                            }
+
+                                            npc.getOrAddTrait(AgentPermanentFlyingTrait.class);
+                                            npc.setBukkitEntityType(type);
+                                            if (!npc.isSpawned()) {
+                                                npc.spawn(respawnAt);
+                                            }
 
                                             plugin.getAgentEdits().get(player).put("Type", typeChange + 1);
                                             int numLeft = AGENT_EDIT_NUM - plugin.getAgentEdits().get(player).get("Type");

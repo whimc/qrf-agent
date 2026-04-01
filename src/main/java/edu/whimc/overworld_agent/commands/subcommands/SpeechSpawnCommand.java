@@ -2,6 +2,7 @@ package edu.whimc.overworld_agent.commands.subcommands;
 
 import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.commands.AbstractSubCommand;
+import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import edu.whimc.overworld_agent.traits.SpawnExpertTrait;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
@@ -84,6 +85,7 @@ public class SpeechSpawnCommand extends AbstractSubCommand {
             trait.setPlayer(player);
             trait.setInputType(false);
             npc.addTrait(trait);
+            npc.addTrait(new AgentPermanentFlyingTrait());
 
             //Set NPC skin by grabbing values from config
             String signature = plugin.getConfig().getString("skins." + skinName + ".signature");

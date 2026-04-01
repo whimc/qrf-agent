@@ -1,5 +1,6 @@
 package edu.whimc.overworld_agent;
 
+import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import edu.whimc.overworld_agent.dialoguetemplate.events.BuildAssessEvent;
 import net.citizensnpcs.api.npc.NPC;
 import org.bukkit.Bukkit;
@@ -57,6 +58,7 @@ public class Listeners  implements Listener {
         Map<String, NPC> agents = plugin.getAgents();
         NPC npc = agents.get(player.getName());
         if(npc != null) {
+            npc.getOrAddTrait(AgentPermanentFlyingTrait.class);
             npc.spawn(player.getLocation());
         }
     }
