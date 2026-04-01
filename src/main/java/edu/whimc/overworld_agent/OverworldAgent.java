@@ -4,6 +4,7 @@ import com.jyckos.speechreceiver.SpeechReceiver;
 import edu.whimc.observations.models.Observation;
 import edu.whimc.overworld_agent.commands.*;
 import edu.whimc.overworld_agent.dialoguetemplate.BuilderDialogue;
+import edu.whimc.overworld_agent.dialoguetemplate.BookTextInputFactory;
 import edu.whimc.overworld_agent.dialoguetemplate.SignMenuFactory;
 import edu.whimc.overworld_agent.dialoguetemplate.Tag;
 import edu.whimc.overworld_agent.dialoguetemplate.models.BuildTemplate;
@@ -44,6 +45,7 @@ public class OverworldAgent extends JavaPlugin {
     private Queryer queryer;
     private List<String> profanity;
     private SignMenuFactory signMenuFactory;
+    private BookTextInputFactory bookTextInputFactory;
     private HashMap<Player,Long> sessions;
     //private SpeechReceiver receiver;
     private HashMap<Player,HashMap<String,Integer>> agentEdits;
@@ -119,6 +121,7 @@ public class OverworldAgent extends JavaPlugin {
         }
 
         signMenuFactory = new SignMenuFactory(this);
+        bookTextInputFactory = new BookTextInputFactory(this);
         getServer().getPluginManager().registerEvents(new Listeners(this), this);
     }
 
@@ -153,6 +156,10 @@ public class OverworldAgent extends JavaPlugin {
         agents.remove(playerName);
     }
     public SignMenuFactory getSignMenuFactory(){return signMenuFactory; }
+
+    public BookTextInputFactory getBookTextInputFactory() {
+        return bookTextInputFactory;
+    }
     public HashMap<Player,HashMap<String, Integer>> getAgentEdits(){
         return agentEdits;
     }

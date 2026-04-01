@@ -8,6 +8,8 @@ expiration-days: 7
 agent_type: scientist_casual
 # Blocks above ground for non-player agent mobs (no gravity + height lock). Player-shaped agents ignore this. Use 0 to disable vertical tracking (only no-gravity).
 agent-non-player-hover-height: 2.0
+# Multiplier applied to Citizens navigator speed for non-player agents (1.0 = default mob follow speed). Higher = faster when hovering/following.
+agent-non-player-navigator-speed-modifier: 1.65
 tags:
   num_tags:
     NoMoon: 25

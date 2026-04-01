@@ -40,6 +40,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.*;
 import java.util.function.Consumer;
+import java.util.logging.Level;
 
 
 public class Dialogue implements Listener {
@@ -84,6 +85,106 @@ public class Dialogue implements Listener {
         return value;
     }
 
+    /**
+     * Runs Journey's {@code jt} for the given destination and turns Journey configuration failures
+     * (e.g. duplicate destination keys across scopes) into a player-visible message instead of an async task exception.
+     */
+    private void dispatchJourneyCommand(Player player, String rawDestination) {
+        String destination = StringUtils.trimToEmpty(rawDestination);
+        if (destination.isEmpty()) {
+            return;
+        }
+        String cmd = "jt " + quoteIfNeeded(destination);
+        try {
+            if (!Bukkit.dispatchCommand(player, cmd)) {
+                Utils.msgNoPrefix(player, ChatColor.RED + "Journey did not run that command. Check permissions and the destination name.");
+            }
+        } catch (Throwable ex) {
+            plugin.getLogger().log(Level.WARNING, "Journey navigation failed for " + player.getName() + ": " + cmd, ex);
+            if (throwableChainMessageContains(ex, "Duplicate key")) {
+                Utils.msgNoPrefix(player,
+                        ChatColor.RED + "Journey failed: two destinations use the same name in Journey's scopes (see server log for the id). "
+                                + "An administrator must fix Journey data so each destination key is unique—e.g. dedupe the "
+                                + "`journey_waypoints` table (`name` / `name_id`) and any NPC scope names that clash.");
+            } else {
+                Utils.msgNoPrefix(player, ChatColor.RED + "Journey failed to start navigation. See the server log for details.");
+            }
+        }
+    }
+
+    private static boolean throwableChainMessageContains(Throwable ex, String fragment) {
+        for (Throwable t = ex; t != null; t = t.getCause()) {
+            String m = t.getMessage();
+            if (m != null && m.contains(fragment)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static List<String> sortedUniqueWaypointNames(List<String> names) {
+        LinkedHashSet<String> uniq = new LinkedHashSet<>();
+        for (String n : names) {
+            if (n != null && !n.isBlank()) {
+                uniq.add(n);
+            }
+        }
+        List<String> out = new ArrayList<>(uniq);
+        out.sort(String.CASE_INSENSITIVE_ORDER);
+        return out;
+    }
+
+    private void openJourneyDestinationBookInput() {
+        this.spigotCallback.clearCallbacks(player);
+        List<String> instruct = Arrays.asList(
+                Utils.color("&0&lJourney"),
+                "",
+                Utils.color("&7Enter the waypoint or destination name on the following pages."),
+                Utils.color("&7Use several pages if you need more space. Click &fDone &7when finished."));
+        openJourneyBookWithRetry(instruct);
+    }
+
+    private void openJourneyBookWithRetry(List<String> instruct) {
+        plugin.getBookTextInputFactory().open(player, instruct, text -> {
+            if (StringUtils.isBlank(text)) {
+                Utils.msgNoPrefix(player, ChatColor.RED + "Please enter a destination, then click Done.");
+                openJourneyBookWithRetry(instruct);
+                return;
+            }
+            String destination = text.trim();
+            plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Guidance"), id -> {
+                this.spigotCallback.clearCallbacks(player);
+                dispatchJourneyCommand(player, destination);
+            });
+        });
+    }
+
+    private void openPlanetTagBookInput() {
+        this.spigotCallback.clearCallbacks(player);
+        List<String> instruct = Arrays.asList(
+                Utils.color("&0&lObservation"),
+                "",
+                Utils.color("&7What do you want to show or ask about on this planet?"),
+                Utils.color("&7Write on the pages below. Click &fDone &7when finished."));
+        openPlanetTagBookWithRetry(instruct);
+    }
+
+    private void openPlanetTagBookWithRetry(List<String> instruct) {
+        plugin.getBookTextInputFactory().open(player, instruct, text -> {
+            String normalized = StringUtils.trimToEmpty(text).toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+            if (normalized.isEmpty()) {
+                Utils.msgNoPrefix(player, ChatColor.RED + "Please enter something, then click Done.");
+                openPlanetTagBookWithRetry(instruct);
+                return;
+            }
+            plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Tag"), id -> {
+                Tag tag = new Tag(plugin, player, normalized);
+                tag.sendFeedback();
+                this.spigotCallback.clearCallbacks(player);
+            });
+        });
+    }
+
     @SuppressWarnings({"rawtypes", "unchecked"})
     private List<String> getJourneyPublicWaypointNamesSafe() {
         try {
@@ -108,10 +209,11 @@ public class Dialogue implements Listener {
                 Map<?, ?> map = (Map<?, ?>) all;
                 List<String> names = new ArrayList<>();
                 for (Object key : map.keySet()) {
-                    if (key != null) names.add(String.valueOf(key));
+                    if (key != null) {
+                        names.add(String.valueOf(key));
+                    }
                 }
-                names.sort(String.CASE_INSENSITIVE_ORDER);
-                return names;
+                return sortedUniqueWaypointNames(names);
             }
 
             if (all instanceof List) {
@@ -124,8 +226,7 @@ public class Dialogue implements Listener {
                         names.add(name);
                     }
                 }
-                names.sort(String.CASE_INSENSITIVE_ORDER);
-                return names;
+                return sortedUniqueWaypointNames(names);
             }
 
             return Collections.emptyList();
@@ -188,35 +289,19 @@ public class Dialogue implements Listener {
                                         "&aClick here to select \"&r" + waypointName + "&a\"",
                                         l -> this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Guidance"), id -> {
                                             this.spigotCallback.clearCallbacks(player);
-                                            Bukkit.dispatchCommand(player, "jt " + quoteIfNeeded(waypointName));
+                                            dispatchJourneyCommand(player, waypointName);
                                         })
                                 );
                             }
                         }
                 );
             } else {
-                // Fallback: avoid bare `/jt` GUI, let player type destination.
+                // Fallback: avoid bare `/jt` GUI; use a book for more typing room than a sign.
                 sendComponent(
                         player,
                         "&8" + BULLET + guidanceResponse,
-                        "&aClick here to type a destination for Journey",
-                        p -> this.plugin.getSignMenuFactory()
-                                .newMenu(Collections.singletonList(Utils.color(signHeader)))
-                                .reopenIfFail(true)
-                                .response((signPlayer, strings) -> {
-                                    String typed = StringUtils.join(Arrays.copyOfRange(strings, 0, strings.length), ' ').trim();
-                                    typed = StringUtils.trimToEmpty(typed);
-                                    if (typed.isEmpty()) {
-                                        return false;
-                                    }
-                                    String destination = typed;
-                                    this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Guidance"), id -> {
-                                        this.spigotCallback.clearCallbacks(player);
-                                        Bukkit.dispatchCommand(player, "jt " + quoteIfNeeded(destination));
-                                    });
-                                    return true;
-                                })
-                                .open(p)
+                        "&aClick here to enter a Journey destination (book)",
+                        p -> openJourneyDestinationBookInput()
                 );
             }
         }
@@ -230,25 +315,8 @@ public class Dialogue implements Listener {
             sendComponent(
                     player,
                     "&8" + BULLET + showResponse,
-                    "&aClick here to show me/ask about something unique to this planet!",
-                    p -> this.plugin.getSignMenuFactory()
-                            .newMenu(Collections.singletonList(Utils.color(signHeader)))
-                            .reopenIfFail(true)
-                            .response((signPlayer, strings) -> {
-                                String response = StringUtils.join(Arrays.copyOfRange(strings, 0, strings.length), ' ').trim();
-                                response = response.toLowerCase();
-                                if (response.isEmpty()) {
-                                    return false;
-                                }
-                                String finalResponse = response;
-                                this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Tag"), id -> {
-                                    Tag tag = new Tag(plugin, player, finalResponse);
-                                    tag.sendFeedback();
-                                    this.spigotCallback.clearCallbacks(player);
-                                });
-                                return true;
-                            })
-                            .open(p)
+                    "&aClick here to show or ask about something unique (book)",
+                    p -> openPlanetTagBookInput()
             );
         }
 /**
