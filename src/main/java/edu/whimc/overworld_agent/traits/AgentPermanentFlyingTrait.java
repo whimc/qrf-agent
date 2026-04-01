@@ -55,6 +55,8 @@ public class AgentPermanentFlyingTrait extends Trait {
         }
 
         float baseline = npc.getNavigator().getDefaultParameters().speed();
+        npc.setFlyable(nonPlayer);
+
         if (nonPlayer) {
             double mult = plugin.getConfig().getDouble(CONFIG_SPEED_MULT_KEY, 1.65);
             if (mult > 0) {
@@ -78,6 +80,11 @@ public class AgentPermanentFlyingTrait extends Trait {
         }
         double hover = plugin.getConfig().getDouble(CONFIG_HOVER_KEY, 2.0);
         if (hover <= 0) {
+            return;
+        }
+
+        // Per-tick teleport fights Citizens pathfinding / FollowTrait; only lock height when idle.
+        if (npc.getNavigator().isNavigating()) {
             return;
         }
 

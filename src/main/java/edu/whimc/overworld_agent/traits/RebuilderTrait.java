@@ -45,6 +45,10 @@ public class RebuilderTrait extends Trait {
         plugin = JavaPlugin.getPlugin(OverworldAgent.class);
         target = playerName;
     }
+
+    public String getTargetPlayerName() {
+        return target;
+    }
     // Here you should load up any values you have previously saved (optional).
     // This does NOT get called when applying the trait for the first time, only loading onto an existing npc at server start.
     // This is called AFTER onAttach so you can load defaults in onAttach and they will be overridden here.

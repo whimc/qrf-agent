@@ -4,7 +4,7 @@ import com.jyckos.speechreceiver.SpeechReceiver;
 import edu.whimc.observations.models.Observation;
 import edu.whimc.overworld_agent.commands.*;
 import edu.whimc.overworld_agent.dialoguetemplate.BuilderDialogue;
-import edu.whimc.overworld_agent.dialoguetemplate.BookTextInputFactory;
+import edu.whimc.overworld_agent.dialoguetemplate.ChatTextInputFactory;
 import edu.whimc.overworld_agent.dialoguetemplate.SignMenuFactory;
 import edu.whimc.overworld_agent.dialoguetemplate.Tag;
 import edu.whimc.overworld_agent.dialoguetemplate.models.BuildTemplate;
@@ -19,6 +19,7 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.permissions.Permission;
 import org.bukkit.plugin.java.JavaPlugin;
 import edu.whimc.overworld_agent.traits.*;
+import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
 
 import java.awt.*;
@@ -45,7 +46,7 @@ public class OverworldAgent extends JavaPlugin {
     private Queryer queryer;
     private List<String> profanity;
     private SignMenuFactory signMenuFactory;
-    private BookTextInputFactory bookTextInputFactory;
+    private ChatTextInputFactory chatTextInputFactory;
     private HashMap<Player,Long> sessions;
     //private SpeechReceiver receiver;
     private HashMap<Player,HashMap<String,Integer>> agentEdits;
@@ -121,7 +122,7 @@ public class OverworldAgent extends JavaPlugin {
         }
 
         signMenuFactory = new SignMenuFactory(this);
-        bookTextInputFactory = new BookTextInputFactory(this);
+        chatTextInputFactory = new ChatTextInputFactory(this);
         getServer().getPluginManager().registerEvents(new Listeners(this), this);
     }
 
@@ -157,8 +158,45 @@ public class OverworldAgent extends JavaPlugin {
     }
     public SignMenuFactory getSignMenuFactory(){return signMenuFactory; }
 
-    public BookTextInputFactory getBookTextInputFactory() {
-        return bookTextInputFactory;
+    public ChatTextInputFactory getChatTextInputFactory() {
+        return chatTextInputFactory;
+    }
+
+    /**
+     * Re-populates {@link #agents} after restart or reconnect by scanning Citizens NPCs with
+     * {@link SpawnExpertTrait} / {@link RebuilderTrait} (in-memory map is not persisted).
+     */
+    public void relinkOwnedAgent(Player player) {
+        if (player == null) {
+            return;
+        }
+        String name = player.getName();
+        if (agents.containsKey(name)) {
+            return;
+        }
+        for (NPC npc : CitizensAPI.getNPCRegistry()) {
+            if (npc.hasTrait(SpawnExpertTrait.class)) {
+                SpawnExpertTrait t = npc.getOrAddTrait(SpawnExpertTrait.class);
+                if (name.equals(t.getAssignedPlayerName())) {
+                    agents.put(name, npc);
+                    return;
+                }
+            }
+            if (npc.hasTrait(SpawnNoviceTrait.class)) {
+                SpawnNoviceTrait t = npc.getTrait(SpawnNoviceTrait.class);
+                if (t != null && name.equals(t.getAssignedPlayerName())) {
+                    agents.put(name, npc);
+                    return;
+                }
+            }
+            if (npc.hasTrait(RebuilderTrait.class)) {
+                RebuilderTrait t = npc.getTrait(RebuilderTrait.class);
+                if (t != null && name.equals(t.getTargetPlayerName())) {
+                    agents.put(name, npc);
+                    return;
+                }
+            }
+        }
     }
     public HashMap<Player,HashMap<String, Integer>> getAgentEdits(){
         return agentEdits;

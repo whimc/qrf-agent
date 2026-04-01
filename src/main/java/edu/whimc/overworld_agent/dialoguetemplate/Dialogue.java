@@ -134,21 +134,20 @@ public class Dialogue implements Listener {
         return out;
     }
 
-    private void openJourneyDestinationBookInput() {
+    private void openJourneyDestinationTextInput() {
         this.spigotCallback.clearCallbacks(player);
         List<String> instruct = Arrays.asList(
                 Utils.color("&0&lJourney"),
                 "",
-                Utils.color("&7Enter the waypoint or destination name on the following pages."),
-                Utils.color("&7Use several pages if you need more space. Click &fDone &7when finished."));
-        openJourneyBookWithRetry(instruct);
+                Utils.color("&7Enter the waypoint or destination name in your next chat message."));
+        openJourneyTextWithRetry(instruct);
     }
 
-    private void openJourneyBookWithRetry(List<String> instruct) {
-        plugin.getBookTextInputFactory().open(player, instruct, text -> {
+    private void openJourneyTextWithRetry(List<String> instruct) {
+        plugin.getChatTextInputFactory().open(player, instruct, text -> {
             if (StringUtils.isBlank(text)) {
-                Utils.msgNoPrefix(player, ChatColor.RED + "Please enter a destination, then click Done.");
-                openJourneyBookWithRetry(instruct);
+                Utils.msgNoPrefix(player, ChatColor.RED + "Please enter a destination in chat.");
+                openJourneyTextWithRetry(instruct);
                 return;
             }
             String destination = text.trim();
@@ -159,22 +158,22 @@ public class Dialogue implements Listener {
         });
     }
 
-    private void openPlanetTagBookInput() {
+    private void openPlanetTagTextInput() {
         this.spigotCallback.clearCallbacks(player);
         List<String> instruct = Arrays.asList(
                 Utils.color("&0&lObservation"),
                 "",
                 Utils.color("&7What do you want to show or ask about on this planet?"),
-                Utils.color("&7Write on the pages below. Click &fDone &7when finished."));
-        openPlanetTagBookWithRetry(instruct);
+                Utils.color("&7Send it as your next chat message."));
+        openPlanetTagTextWithRetry(instruct);
     }
 
-    private void openPlanetTagBookWithRetry(List<String> instruct) {
-        plugin.getBookTextInputFactory().open(player, instruct, text -> {
+    private void openPlanetTagTextWithRetry(List<String> instruct) {
+        plugin.getChatTextInputFactory().open(player, instruct, text -> {
             String normalized = StringUtils.trimToEmpty(text).toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
             if (normalized.isEmpty()) {
-                Utils.msgNoPrefix(player, ChatColor.RED + "Please enter something, then click Done.");
-                openPlanetTagBookWithRetry(instruct);
+                Utils.msgNoPrefix(player, ChatColor.RED + "Please enter something in chat.");
+                openPlanetTagTextWithRetry(instruct);
                 return;
             }
             plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Tag"), id -> {
@@ -257,6 +256,7 @@ public class Dialogue implements Listener {
     }
 
     public void doDialogue() {
+        plugin.relinkOwnedAgent(player);
         Utils.msgNoPrefix(player, "&lWhat do you want to discuss?", "");
         String endResponse = plugin.getConfig().getString("template-gui.text.end-your-own-response-speech");
         String customResponse = plugin.getConfig().getString("template-gui.text.write-your-own-response");
@@ -296,12 +296,12 @@ public class Dialogue implements Listener {
                         }
                 );
             } else {
-                // Fallback: avoid bare `/jt` GUI; use a book for more typing room than a sign.
+                // Fallback: avoid bare `/jt` GUI; use chat for longer input than a sign (Paper 1.21.11+ book API requires written_book only).
                 sendComponent(
                         player,
                         "&8" + BULLET + guidanceResponse,
-                        "&aClick here to enter a Journey destination (book)",
-                        p -> openJourneyDestinationBookInput()
+                        "&aClick here to enter a Journey destination (chat)",
+                        p -> openJourneyDestinationTextInput()
                 );
             }
         }
@@ -315,8 +315,8 @@ public class Dialogue implements Listener {
             sendComponent(
                     player,
                     "&8" + BULLET + showResponse,
-                    "&aClick here to show or ask about something unique (book)",
-                    p -> openPlanetTagBookInput()
+                    "&aClick here to show or ask about something unique (chat)",
+                    p -> openPlanetTagTextInput()
             );
         }
 /**

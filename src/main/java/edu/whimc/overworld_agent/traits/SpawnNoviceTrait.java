@@ -39,6 +39,10 @@ public class SpawnNoviceTrait extends Trait {
         plugin = JavaPlugin.getPlugin(OverworldAgent.class);
     }
 
+    public String getAssignedPlayerName() {
+        return playerName;
+    }
+
 
 
     // Here you should load up any values you have previously saved (optional).

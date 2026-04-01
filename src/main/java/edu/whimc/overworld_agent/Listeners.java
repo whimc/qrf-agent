@@ -55,6 +55,7 @@ public class Listeners  implements Listener {
         edits.put("Type", 0);
         HashMap<Player,HashMap<String, Integer>> agentEdits = plugin.getAgentEdits();
         agentEdits.putIfAbsent(player, edits);
+        plugin.relinkOwnedAgent(player);
         Map<String, NPC> agents = plugin.getAgents();
         NPC npc = agents.get(player.getName());
         if(npc != null) {
