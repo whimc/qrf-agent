@@ -112,6 +112,11 @@ public class OverworldAgent extends JavaPlugin {
         getCommand("assess-habitat").setExecutor(assessCommand);
         getCommand("assess-habitat").setTabCompleter(assessCommand);
 
+        // Internal command used by clickable chat components (see SpigotCallback)
+        if (getCommand("oacallback") != null) {
+            getCommand("oacallback").setExecutor((sender, command, label, args) -> true);
+        }
+
         signMenuFactory = new SignMenuFactory(this);
         getServer().getPluginManager().registerEvents(new Listeners(this), this);
     }

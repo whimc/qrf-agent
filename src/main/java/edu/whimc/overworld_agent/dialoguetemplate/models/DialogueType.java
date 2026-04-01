@@ -1,6 +1,6 @@
 package edu.whimc.overworld_agent.dialoguetemplate.models;
 
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 
 public enum DialogueType {
 

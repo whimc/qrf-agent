@@ -17,21 +17,16 @@ import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
 import net.citizensnpcs.trait.FollowTrait;
 import net.citizensnpcs.trait.SkinTrait;
+import net.citizensnpcs.api.trait.trait.MobType;
 import net.md_5.bungee.api.chat.ComponentBuilder;
 import net.md_5.bungee.api.chat.HoverEvent;
 import net.md_5.bungee.api.chat.TextComponent;
-import net.whimxiqal.journey.Cell;
-import net.whimxiqal.journey.bukkit.search.event.BukkitFoundSolutionEvent;
-import net.whimxiqal.journey.Journey;
-import net.whimxiqal.journey.bukkit.util.BukkitUtil;
-import net.whimxiqal.journey.navigation.Itinerary;
-import net.whimxiqal.journey.navigation.Step;
-import net.whimxiqal.journey.search.event.FoundSolutionEvent;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 
 import org.bukkit.*;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
 
 import org.bukkit.event.EventHandler;
@@ -40,6 +35,8 @@ import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Vector;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.*;
 import java.util.function.Consumer;
 
@@ -78,6 +75,85 @@ public class Dialogue implements Listener {
         }
     }
 
+    private static String quoteIfNeeded(String value) {
+        if (value == null) return "";
+        if (value.contains(" ")) {
+            return "\"" + value + "\"";
+        }
+        return value;
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private List<String> getJourneyPublicWaypointNamesSafe() {
+        try {
+            Class<?> journeyClass = Class.forName("net.whimxiqal.journey.Journey");
+            Method getMethod = journeyClass.getMethod("get");
+            Object journey = getMethod.invoke(null);
+            if (journey == null) return Collections.emptyList();
+
+            Method dataManagerMethod = journey.getClass().getMethod("dataManager");
+            Object dataManager = dataManagerMethod.invoke(journey);
+            if (dataManager == null) return Collections.emptyList();
+
+            Method publicWaypointManagerMethod = dataManager.getClass().getMethod("publicWaypointManager");
+            Object publicWaypointManager = publicWaypointManagerMethod.invoke(dataManager);
+            if (publicWaypointManager == null) return Collections.emptyList();
+
+            Method getAllMethod = publicWaypointManager.getClass().getMethod("getAll");
+            Object all = getAllMethod.invoke(publicWaypointManager);
+            if (all == null) return Collections.emptyList();
+
+            if (all instanceof Map) {
+                Map<?, ?> map = (Map<?, ?>) all;
+                List<String> names = new ArrayList<>();
+                for (Object key : map.keySet()) {
+                    if (key != null) names.add(String.valueOf(key));
+                }
+                names.sort(String.CASE_INSENSITIVE_ORDER);
+                return names;
+            }
+
+            if (all instanceof List) {
+                List list = (List) all;
+                List<String> names = new ArrayList<>();
+                for (Object item : list) {
+                    if (item == null) continue;
+                    String name = extractWaypointName(item);
+                    if (name != null && !name.isBlank()) {
+                        names.add(name);
+                    }
+                }
+                names.sort(String.CASE_INSENSITIVE_ORDER);
+                return names;
+            }
+
+            return Collections.emptyList();
+        } catch (ClassNotFoundException ignored) {
+            return Collections.emptyList();
+        } catch (InvocationTargetException | NoSuchMethodException | IllegalAccessException e) {
+            return Collections.emptyList();
+        } catch (Throwable t) {
+            return Collections.emptyList();
+        }
+    }
+
+    private static String extractWaypointName(Object waypoint) {
+        try {
+            Method m = waypoint.getClass().getMethod("name");
+            Object v = m.invoke(waypoint);
+            return v == null ? null : String.valueOf(v);
+        } catch (ReflectiveOperationException ignored) {
+            // continue
+        }
+        try {
+            Method m = waypoint.getClass().getMethod("getName");
+            Object v = m.invoke(waypoint);
+            return v == null ? null : String.valueOf(v);
+        } catch (ReflectiveOperationException ignored) {
+            return null;
+        }
+    }
+
     public void doDialogue() {
         Utils.msgNoPrefix(player, "&lWhat do you want to discuss?", "");
         String endResponse = plugin.getConfig().getString("template-gui.text.end-your-own-response-speech");
@@ -89,41 +165,59 @@ public class Dialogue implements Listener {
         String tagScoreResponse = plugin.getConfig().getString("template-gui.text.tag-score-response");
         String scoreResponse = plugin.getConfig().getString("template-gui.text.score-response");
         String agentEdit = plugin.getConfig().getString("template-gui.text.agent-edit");
-        Map<String, Cell> waypoints = Journey.get().dataManager().publicWaypointManager().getAll();
-        List<String> locationOnWorld = new ArrayList<>();
-        for (Map.Entry<String, Cell> entry : waypoints.entrySet()) {
-            if (BukkitUtil.getWorld(entry.getValue()).getName().equals(player.getWorld().getName())) {
-                locationOnWorld.add(entry.getKey());
-            }
-        }
-        //Agent Guidance Option
-        if(locationOnWorld.size() > 0) {
-            sendComponent(
-                    player,
-                    "&8" + BULLET + guidanceResponse,
-                    "&aClick here to let me show you something cool!",
-                    p -> {
-                        this.spigotCallback.clearCallbacks(player);
-                        Utils.msgNoPrefix(player, "&lClick the location you want to go to:", "");
+        // Agent Guidance Option
+        // NOTE: Journey 1.3.x may throw when opening its GUI via plain `/jt` on some servers.
+        // We avoid that by enumerating public waypoints (if available) and dispatching `jt <waypoint>`
+        // which does not require opening the GUI.
+        if (Bukkit.getPluginManager().getPlugin("Journey") != null) {
+            List<String> publicWaypointNames = getJourneyPublicWaypointNamesSafe();
+            if (!publicWaypointNames.isEmpty()) {
+                sendComponent(
+                        player,
+                        "&8" + BULLET + guidanceResponse,
+                        "&aClick here to pick a public waypoint",
+                        p -> {
+                            this.spigotCallback.clearCallbacks(player);
+                            Utils.msgNoPrefix(player, "&lClick the location you want to go to:", "");
 
-                        for (String entry : locationOnWorld) {
+                            for (String waypointName : publicWaypointNames) {
                                 sendComponent(
                                         player,
-                                        "&8" + BULLET + " &r" + entry,
-                                        "&aClick here to select \"&r" + entry + "&a\"",
-                                        l -> {
-                                            this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Guidance"), id -> {
-                                                String location = entry;
-                                                if (location.contains(" ")) {
-                                                    location = "\"" + location + "\"";
-                                                }
-                                                Bukkit.dispatchCommand(player, "jt " + location);
-                                                this.spigotCallback.clearCallbacks(player);
-                                            });
-                                        });
+                                        "&8" + BULLET + " &r" + waypointName,
+                                        "&aClick here to select \"&r" + waypointName + "&a\"",
+                                        l -> this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Guidance"), id -> {
+                                            this.spigotCallback.clearCallbacks(player);
+                                            Bukkit.dispatchCommand(player, "jt " + quoteIfNeeded(waypointName));
+                                        })
+                                );
+                            }
                         }
-
-                    });
+                );
+            } else {
+                // Fallback: avoid bare `/jt` GUI, let player type destination.
+                sendComponent(
+                        player,
+                        "&8" + BULLET + guidanceResponse,
+                        "&aClick here to type a destination for Journey",
+                        p -> this.plugin.getSignMenuFactory()
+                                .newMenu(Collections.singletonList(Utils.color(signHeader)))
+                                .reopenIfFail(true)
+                                .response((signPlayer, strings) -> {
+                                    String typed = StringUtils.join(Arrays.copyOfRange(strings, 0, strings.length), ' ').trim();
+                                    typed = StringUtils.trimToEmpty(typed);
+                                    if (typed.isEmpty()) {
+                                        return false;
+                                    }
+                                    String destination = typed;
+                                    this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Guidance"), id -> {
+                                        this.spigotCallback.clearCallbacks(player);
+                                        Bukkit.dispatchCommand(player, "jt " + quoteIfNeeded(destination));
+                                    });
+                                    return true;
+                                })
+                                .open(p)
+                );
+            }
         }
         //Agent Tag option
         Map<Player, Map<World, Integer>> playerTags = Tag.getPlayerTags();
@@ -228,7 +322,8 @@ public class Dialogue implements Listener {
 */
         int skinChange = plugin.getAgentEdits().get(player).get("Skin");
         int nameChange = plugin.getAgentEdits().get(player).get("Name");
-        if((skinChange < AGENT_EDIT_NUM || nameChange < AGENT_EDIT_NUM) && embodied){
+        int typeChange = plugin.getAgentEdits().get(player).getOrDefault("Type", 0);
+        if((skinChange < AGENT_EDIT_NUM || nameChange < AGENT_EDIT_NUM || typeChange < AGENT_EDIT_NUM) && embodied){
         //Agent edit Option
         sendComponent(player, "&8" + BULLET + agentEdit, "&aClick here to change me!", p -> {
             this.spigotCallback.clearCallbacks(player);
@@ -313,6 +408,48 @@ public class Dialogue implements Listener {
                             })
                             .open(p)
             );}
+            if (typeChange < AGENT_EDIT_NUM) {
+                sendComponent(
+                        player,
+                        "&8" + BULLET + " &rEntity Type",
+                        "&aClick here to change what I am",
+                        l -> {
+                            Utils.msgNoPrefix(player, "&lClick what type you want me to be:", "");
+                            for (EntityType type : Arrays.asList(EntityType.PLAYER, EntityType.SHEEP, EntityType.AXOLOTL)) {
+                                String label = StringUtils.capitalize(type.name().toLowerCase());
+                                sendComponent(
+                                        player,
+                                        "&8" + BULLET + " &r" + label,
+                                        "&aClick here to become \"&r" + label + "&a\"",
+                                        m -> this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Edit"), id -> {
+                                            NPC npc = plugin.getAgents().get(player.getName());
+                                            if (npc == null) {
+                                                player.sendMessage("You need to have an AI friend first. Please try again");
+                                                this.spigotCallback.clearCallbacks(player);
+                                                return;
+                                            }
+
+                                            Location respawnAt = npc.getStoredLocation() != null ? npc.getStoredLocation() : player.getLocation();
+                                            if (npc.isSpawned()) {
+                                                npc.despawn();
+                                            }
+                                            npc.getOrAddTrait(MobType.class).setType(type);
+                                            npc.spawn(respawnAt);
+
+                                            plugin.getAgentEdits().get(player).put("Type", typeChange + 1);
+                                            int numLeft = AGENT_EDIT_NUM - plugin.getAgentEdits().get(player).get("Type");
+                                            player.sendMessage("Your agent's entity type has been changed to " + label + ".\n You have " + numLeft + " type edits left.");
+
+                                            plugin.getQueryer().storeNewAgent(player, "edit", npc.getName(), type.name(), id2 -> {
+                                                plugin.getAgents().put(player.getName(), npc);
+                                            });
+                                            this.spigotCallback.clearCallbacks(player);
+                                        })
+                                );
+                            }
+                        }
+                );
+            }
         });}
     }
 
@@ -341,26 +478,18 @@ public class Dialogue implements Listener {
 
                 } else if (prompt.getPrompt().equalsIgnoreCase("guidance")) {
                     DialoguePrompt finalPrompt = prompt;
-                    String[] split = response.replaceAll("[^a-zA-Z]", "").toLowerCase().split("\\s+");
-                    String destination = "";
-                    Map<String, Cell> waypoints = Journey.get().dataManager().publicWaypointManager().getAll();
-                    for (Map.Entry<String,Cell> entry : waypoints.entrySet()) {
-                        for (String word : split) {
-                            word = word.toLowerCase();
-                            String locationLower = entry.getKey().toLowerCase();
-                            if (locationLower.contains(word)) {
-                                destination = entry.getKey();
-                                break;
-                            }
-                        }
-                    }
+                    String destination = StringUtils.trimToEmpty(response);
                     feedback = feedback.replace("{LOCATION}", destination);
                     if(destination.equals("")){
                         feedback = "Sorry, I could not find that location";
                     } else {
                         String finalDestination = destination;
                         Bukkit.getScheduler().runTask(plugin, () -> {
-                            Bukkit.dispatchCommand(player, finalPrompt.getTool() + " " + finalDestination);
+                            String cmdDestination = finalDestination;
+                            if (cmdDestination.contains(" ")) {
+                                cmdDestination = "\"" + cmdDestination + "\"";
+                            }
+                            Bukkit.dispatchCommand(player, finalPrompt.getTool() + " " + cmdDestination);
                         });
                     }
                 } else if (prompt.getPrompt().equalsIgnoreCase("npcs")) {

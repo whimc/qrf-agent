@@ -6,6 +6,7 @@ import com.comphenix.protocol.events.PacketAdapter;
 import com.comphenix.protocol.events.PacketContainer;
 import com.comphenix.protocol.events.PacketEvent;
 import com.comphenix.protocol.wrappers.BlockPosition;
+import java.lang.reflect.InvocationTargetException;
 import edu.whimc.overworld_agent.utils.Utils;
 import java.util.Map;
 import java.util.UUID;
@@ -17,7 +18,6 @@ import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
-import java.lang.reflect.InvocationTargetException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
@@ -98,7 +98,7 @@ public final class SignMenuFactory {
             location = player.getLocation();
             location.setY(location.getBlockY() - 4);
 
-            player.sendBlockChange(location, Material.SIGN.createBlockData());
+            player.sendBlockChange(location, Material.OAK_SIGN.createBlockData());
             player.sendSignChange(
                     location,
                     text.stream().map(Utils::color).collect(Collectors.toList()).toArray(new String[4])
@@ -107,11 +107,7 @@ public final class SignMenuFactory {
             PacketContainer openSign = ProtocolLibrary.getProtocolManager().createPacket(PacketType.Play.Server.OPEN_SIGN_EDITOR);
             BlockPosition position = new BlockPosition(location.getBlockX(), location.getBlockY(), location.getBlockZ());
             openSign.getBlockPositionModifier().write(0, position);
-            try {
-                ProtocolLibrary.getProtocolManager().sendServerPacket(player, openSign);
-            } catch (InvocationTargetException exception) {
-                exception.printStackTrace();
-            }
+            ProtocolLibrary.getProtocolManager().sendServerPacket(player, openSign);
 
             inputs.put(player.getUniqueId(), this);
         }

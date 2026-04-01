@@ -8,7 +8,7 @@ Alternatively you can use `/agents spawn <skin name> <agent name>` to spawn an a
 
 To spawn a builder agent use `/agents rebuilderspawn` and interact with it using the same method as described previously with the guide agent.
 
-_**Requires Java 11+**_
+_**Requires Java 21+**_
 
 ---
 
@@ -74,7 +74,7 @@ Input for `<skin name>` make sure spelled correctly and all lowercase
 ### Guide
 | Dialogue Option | Description                                                                                                                                     |
 |-----------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
-| Guidance        | Uses the Journey plugin to give directions to places of interest using server waypoints on the world.                                           |
+| Guidance        | Uses the Journey plugin to open its destination selector (`/jt`) so players can navigate to places of interest (waypoints, warps, etc.).        |
 | Tagging         | Gives feedback to students using pattern matching if they use their tag to make note of something scientifically important in the world.        |
 | Edit            | Only available to emboodied agents and not agents using the chat function. Allows students to make changes to their skin or name up to 5 times. |
 

@@ -17,6 +17,7 @@ import org.bukkit.entity.Player;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -61,7 +62,18 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
             }
         }
         String skinName = args[0];
-        for(int k = 1; k < args.length; k++){
+
+        EntityType entityType = EntityType.PLAYER;
+        int nameEndExclusive = args.length;
+        if (args.length >= 3) {
+            EntityType parsed = parseSupportedEntityType(args[args.length - 1]);
+            if (parsed != null) {
+                entityType = parsed;
+                nameEndExclusive = args.length - 1;
+            }
+        }
+
+        for(int k = 1; k < nameEndExclusive; k++){
             npcName += args[k] + " ";
         }
         npcName = npcName.substring(0,npcName.length()-1);
@@ -72,14 +84,14 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
             ConfigurationSection sec = plugin.getConfig().getConfigurationSection(path);
             Set<String> keys = sec.getKeys(false);
             List<String> skins = new ArrayList<>(keys);
-            if (!skins.contains(skinName)) {
+            if (entityType == EntityType.PLAYER && !skins.contains(skinName)) {
                 player.sendMessage("Make sure to give your AI friend a valid skin name, you can press tab to complete one of the options! Please try again");
                 return false;
             }
             NPCRegistry registry = CitizensAPI.getNPCRegistry();
 
             //NPC is a player and follows the assigned player and has behaviors specified in SpawnExpertTrait
-            NPC npc = registry.createNPC(EntityType.PLAYER, npcName);
+            NPC npc = registry.createNPC(entityType, npcName);
             npc.getOrAddTrait(FollowTrait.class).follow(player);
             npc.getOrAddTrait(LookClose.class).setDisableWhileNavigating(true);
             npc.getNavigator().getLocalParameters().range(15);
@@ -88,12 +100,16 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
             trait.setInputType(true);
             npc.addTrait(trait);
 
-            //Set NPC skin by grabbing values from config
-            String signature = plugin.getConfig().getString(path + "." + skinName + ".signature");
-            String data = plugin.getConfig().getString(path + "." + skinName + ".data");
-            SkinTrait skinTrait = npc.getOrAddTrait(SkinTrait.class);
-            skinTrait.setSkinPersistent(skinName, signature, data);
-            plugin.getQueryer().storeNewAgent(player, COMMAND, npcName, skinName, id -> {
+            if (entityType == EntityType.PLAYER) {
+                //Set NPC skin by grabbing values from config
+                String signature = plugin.getConfig().getString(path + "." + skinName + ".signature");
+                String data = plugin.getConfig().getString(path + "." + skinName + ".data");
+                SkinTrait skinTrait = npc.getOrAddTrait(SkinTrait.class);
+                skinTrait.setSkinPersistent(skinName, signature, data);
+            }
+
+            String agentSkinOrType = entityType == EntityType.PLAYER ? skinName : entityType.name();
+            plugin.getQueryer().storeNewAgent(player, COMMAND, npcName, agentSkinOrType, id -> {
                 npc.spawn(player.getLocation());
                 plugin.getAgents().put(player.getName(), npc);
             });
@@ -101,6 +117,17 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
         }
         player.sendMessage("You already have an AI friend. You can change their name by right clicking on them.");
         return true;
+    }
+
+    private static EntityType parseSupportedEntityType(String raw) {
+        if (raw == null) return null;
+        String v = raw.trim().toUpperCase(Locale.ROOT);
+        return switch (v) {
+            case "PLAYER" -> EntityType.PLAYER;
+            case "SHEEP" -> EntityType.SHEEP;
+            case "AXOLOTL" -> EntityType.AXOLOTL;
+            default -> null;
+        };
     }
 
     /**

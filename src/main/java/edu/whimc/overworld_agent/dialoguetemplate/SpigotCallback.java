@@ -25,7 +25,7 @@ public class SpigotCallback {
         Bukkit.getPluginManager().registerEvents(new Listener() {
             @EventHandler
             public void command(PlayerCommandPreprocessEvent e) {
-                if (!e.getMessage().startsWith("/spigot:callback")) {
+                if (!e.getMessage().startsWith("/oacallback")) {
                     return;
                 }
                 e.setCancelled(true);
@@ -68,6 +68,6 @@ public class SpigotCallback {
         } else {
             this.playerCallbacks.put(playerUUID, new HashSet<>(Arrays.asList(callbackUUID)));
         }
-        text.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/spigot:callback " + callbackUUID));
+        text.setClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/oacallback " + callbackUUID));
     }
 }
