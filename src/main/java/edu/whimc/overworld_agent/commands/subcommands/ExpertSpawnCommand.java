@@ -14,7 +14,6 @@ import net.citizensnpcs.trait.LookClose;
 import net.citizensnpcs.trait.SkinTrait;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.entity.Animals;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
 
@@ -112,10 +111,14 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
             }
             NPCRegistry registry = CitizensAPI.getNPCRegistry();
 
-            // Validate entity type if non-player
+            // Validate entity type if non-player (fixed whitelist in AgentEntityTypes; not all Animals in the game)
             if (entityType != EntityType.PLAYER) {
+                if (!AgentEntityTypes.isAllowedNonPlayerAgent(entityType)) {
+                    player.sendMessage("That entity type cannot be used as an animal agent.");
+                    return true;
+                }
                 Class<?> entityClass = entityType.getEntityClass();
-                if (entityClass == null || !entityType.isAlive() || !Animals.class.isAssignableFrom(entityClass)) {
+                if (entityClass == null || !entityType.isAlive()) {
                     player.sendMessage("That entity type cannot be used as an animal agent.");
                     return true;
                 }
@@ -176,7 +179,6 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
             entityOpts.addAll(ANIMAL_ENTITY_NAMES);
             return entityOpts.stream()
                     .filter(v -> v.startsWith(prefix))
-                    .sorted()
                     .collect(Collectors.toList());
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("player")) {

@@ -9,7 +9,7 @@ Alternatively you can spawn a guide agent with **`/agents spawn`** or **`/agent 
 **Spawn syntax**
 
 - **Player agent:** `/agents spawn player <skin> <name…>` — first tab-completion token is `player`, second is a skin key from `skins.<agent_type>` in `config.yml`, then the display name (spaces allowed in the name).
-- **Animal agent:** `/agents spawn <animal> <name…>` — `<animal>` is a lowercase Bukkit **`EntityType`** name for a **living mob whose class implements `org.bukkit.entity.Animals`** (cows, horses, wolves, cats, etc.; not zombies, armor stands, or monsters). No skin argument.
+- **Animal agent:** `/agents spawn <animal> <name…>` — `<animal>` is one of the **fixed** mob IDs allowed by `AgentEntityTypes` (see that class / tab-complete: e.g. `axolotl`, `ocelot`, `turtle`, `sheep`, `strider`, `sniffer`, `nautilus`, `happy_ghast`, `bee`, `parrot`; types not present on your game version are omitted at runtime). No skin argument.
 - **Legacy:** `/agents spawn <skin> <name…>` — if the first token is not a valid entity type, it is treated as a **player** skin key (same as omitting `player`).
 
 Tab-complete the first argument to see every allowed value on your server version.
@@ -203,11 +203,11 @@ Permissions follow **`whimc-agent.<base>.<subcommand>`** (each `/agents …` sub
 The spawn command accepts:
 
 1. **`player`** — then a **skin key** under `skins.<agent_type>` (see `agent_type` in `config.yml`, usually **`scientist_casual`** or **`scientist_stereotype`**).
-2. Any other token that parses as a Bukkit **`EntityType`** which is **alive** and whose entity class **`implements Animals`** (implementation: `AgentEntityTypes` / `ExpertSpawnCommand`). Examples on a typical 1.21 server include **`cow`**, **`pig`**, **`sheep`**, **`horse`**, **`wolf`**, **`cat`**, **`fox`**, **`panda`**, **`camel`**, **`sniffer`**, etc. Invalid examples: **`zombie`**, **`villager`** (not `Animals`), **`armor_stand`**.
+2. Any other token that is in the **configured whitelist** in `AgentEntityTypes` (`player` + fixed mob enum names). Other `EntityType` IDs are rejected even if they are valid mobs on the server.
 
-The exact list **depends on your Minecraft/Paper version**; use **tab completion** on the first argument of `/agents spawn` / `/agent spawn` for the full sorted list (`player` plus valid animal IDs).
+Use **tab completion** on the first argument of `/agents spawn` / `/agent spawn` for the list (`player` plus allowed mobs in whitelist order). On older servers, mobs whose `EntityType` constant does not exist yet (e.g. `HAPPY_GHAST`) are skipped automatically.
 
-**In-game entity type change:** embodied players can switch the agent between **`player`** and any selectable animal from the edit dialogue (`AgentEntityTypes.selectableAgentTypes()` = `player` + sorted `Animals` types).
+**In-game entity type change:** embodied players can switch the agent between **`player`** and the same allowed mob list (`AgentEntityTypes.selectableAgentTypes()`).
 
 ### Skin keys (under each `skins` section)
 
