@@ -3,6 +3,7 @@ package edu.whimc.overworld_agent.commands.subcommands;
 import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.commands.AbstractSubCommand;
 import edu.whimc.overworld_agent.utils.AgentEntityTypes;
+import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import edu.whimc.overworld_agent.traits.SpawnExpertTrait;
 import net.citizensnpcs.api.CitizensAPI;
@@ -103,11 +104,11 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
         }
         if(!plugin.getAgents().containsKey(playerName)) {
             ConfigurationSection sec = plugin.getConfig().getConfigurationSection(path);
-            Set<String> keys = sec.getKeys(false);
+            Set<String> keys = sec != null ? sec.getKeys(false) : Set.of();
             List<String> skins = new ArrayList<>(keys);
             if (entityType == EntityType.PLAYER && (skinName == null || !skins.contains(skinName))) {
                 player.sendMessage("Make sure to give your AI friend a valid skin name, you can press tab to complete one of the options! Please try again");
-                return false;
+                return true;
             }
             NPCRegistry registry = CitizensAPI.getNPCRegistry();
 
@@ -123,7 +124,7 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
             NPC npc = registry.createNPC(entityType, npcName);
             npc.getOrAddTrait(FollowTrait.class).follow(player);
             npc.getOrAddTrait(LookClose.class).setDisableWhileNavigating(true);
-            npc.getNavigator().getLocalParameters().range(15);
+            AgentFollowTuning.applyForPlannedType(plugin, npc, entityType);
             SpawnExpertTrait trait = new SpawnExpertTrait();
             trait.setPlayer(player);
             trait.setInputType(true);
@@ -141,6 +142,7 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
             String agentSkinOrType = entityType == EntityType.PLAYER ? skinName : entityType.name();
             plugin.getQueryer().storeNewAgent(player, COMMAND, npcName, agentSkinOrType, id -> {
                 npc.spawn(player.getLocation());
+                npc.getOrAddTrait(FollowTrait.class).follow(player);
                 plugin.getAgents().put(player.getName(), npc);
             });
             return true;
@@ -167,28 +169,14 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
     @Override
     protected List<java.lang.String> onTabComplete(CommandSender sender, java.lang.String[] args) {
         if (args.length == 1) {
-            // If user starts with entityType, show entity options (player + animals).
-            // Otherwise, keep the old behavior and show skins (so old `/agents spawn <skin> ...` still tab-completes well).
+            // First token is always entity type: `player` or an animal enum name (skins are the *second* token after `player`).
             String prefix = args[0].toLowerCase(Locale.ROOT);
             List<String> entityOpts = new ArrayList<>();
             entityOpts.add("player");
             entityOpts.addAll(ANIMAL_ENTITY_NAMES);
-            List<String> matchingEntities = entityOpts.stream()
+            return entityOpts.stream()
                     .filter(v -> v.startsWith(prefix))
-                    .collect(Collectors.toList());
-
-            if (!matchingEntities.isEmpty()) {
-                return matchingEntities;
-            }
-
-            String path = "skins";
-            String type = plugin.getSkinType();
-            path = path + "." + type;
-            ConfigurationSection sec = plugin.getConfig().getConfigurationSection(path);
-            Set<String> keys = sec.getKeys(false);
-            List<String> skins = new ArrayList<>(keys);
-            return skins.stream()
-                    .filter(v -> v.toLowerCase(Locale.ROOT).startsWith(prefix))
+                    .sorted()
                     .collect(Collectors.toList());
         }
         if (args.length == 2 && args[0].equalsIgnoreCase("player")) {
@@ -196,6 +184,9 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
             String type = plugin.getSkinType();
             path = path + "." + type;
             ConfigurationSection sec = plugin.getConfig().getConfigurationSection(path);
+            if (sec == null) {
+                return Arrays.asList();
+            }
             Set<String> keys = sec.getKeys(false);
             List<String> skins = new ArrayList<>(keys);
             String prefix = args[1].toLowerCase(Locale.ROOT);

@@ -2,6 +2,7 @@ package edu.whimc.overworld_agent.traits;
 
 import edu.whimc.overworld_agent.OverworldAgent;
 import net.citizensnpcs.api.trait.Trait;
+import net.citizensnpcs.trait.FollowTrait;
 import net.citizensnpcs.trait.Gravity;
 import org.bukkit.FluidCollisionMode;
 import org.bukkit.Location;
@@ -34,6 +35,9 @@ public class AgentPermanentFlyingTrait extends Trait {
     @Override
     public void onSpawn() {
         applyFlyingForCurrentEntity();
+        if (npc.isSpawned() && npc.getEntity() != null) {
+            npc.getEntity().getPassengers().forEach(npc.getEntity()::removePassenger);
+        }
     }
 
     /**
@@ -67,6 +71,10 @@ public class AgentPermanentFlyingTrait extends Trait {
         } else {
             npc.getNavigator().getLocalParameters().speedModifier(baseline);
         }
+
+        if (npc.hasTrait(FollowTrait.class)) {
+            AgentFollowTuning.applyForCurrentEntity(plugin, npc);
+        }
     }
 
     @Override
@@ -83,11 +91,6 @@ public class AgentPermanentFlyingTrait extends Trait {
             return;
         }
 
-        // Per-tick teleport fights Citizens pathfinding / FollowTrait; only lock height when idle.
-        if (npc.getNavigator().isNavigating()) {
-            return;
-        }
-
         Location cur = entity.getLocation();
         World world = cur.getWorld();
         if (world == null) {
@@ -101,6 +104,12 @@ public class AgentPermanentFlyingTrait extends Trait {
         }
 
         double dy = targetY - cur.getY();
+        // While Citizens is actively pathfinding, do not teleport — hover fights horizontal navigation.
+        // FollowTrait can be "active" between path updates; allow vertical correction then so hover height catches up.
+        if (npc.getNavigator().isNavigating()) {
+            return;
+        }
+
         double newY = cur.getY() + Math.signum(dy) * Math.min(MAX_VERTICAL_STEP_PER_TICK, Math.abs(dy));
         Location to = cur.clone();
         to.setY(newY);

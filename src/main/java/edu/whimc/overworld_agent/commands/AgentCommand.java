@@ -19,6 +19,7 @@ public class AgentCommand implements CommandExecutor, TabCompleter {
 
     public AgentCommand(OverworldAgent plugin) {
         subCommands.put("chat", new ChatCommand(plugin, "agent", "chat"));
+        subCommands.put("spawn", plugin.getExpertSpawnCommand());
     }
 
     @Override

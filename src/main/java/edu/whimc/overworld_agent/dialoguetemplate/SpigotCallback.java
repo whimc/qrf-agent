@@ -52,12 +52,14 @@ public class SpigotCallback {
     }
 
     public void clearCallbacks(Player player) {
-        if (!this.playerCallbacks.containsKey(player.getUniqueId())) {
+        UUID pid = player.getUniqueId();
+        if (!this.playerCallbacks.containsKey(pid)) {
             return;
         }
-        for (UUID uuid : this.playerCallbacks.get(player.getUniqueId())) {
+        for (UUID uuid : this.playerCallbacks.get(pid)) {
             this.callbacks.remove(uuid);
         }
+        this.playerCallbacks.remove(pid);
     }
 
     public void createCommand(UUID playerUUID, TextComponent text, Consumer<Player> consumer) {

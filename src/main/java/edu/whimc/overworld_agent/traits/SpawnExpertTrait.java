@@ -7,6 +7,7 @@ import net.citizensnpcs.Settings;
 import net.citizensnpcs.api.persistence.Persist;
 import net.citizensnpcs.api.trait.Trait;
 import net.citizensnpcs.api.util.DataKey;
+import net.citizensnpcs.trait.FollowTrait;
 import org.bukkit.Bukkit;
 
 import org.bukkit.entity.Player;
@@ -90,8 +91,12 @@ public class SpawnExpertTrait extends Trait {
         if(npc.isSpawned() && player != null && Bukkit.getPlayer(player) != null){
             if (!npc.getEntity().getWorld().equals(Bukkit.getPlayer(player).getWorld())) {
                 if (Settings.Setting.FOLLOW_ACROSS_WORLDS.asBoolean()) {
+                    Player follower = Bukkit.getPlayer(player);
                     npc.despawn();
-                    npc.spawn(Bukkit.getPlayer(player).getLocation());
+                    npc.spawn(follower.getLocation());
+                    npc.getOrAddTrait(FollowTrait.class).follow(follower);
+                    npc.getOrAddTrait(AgentPermanentFlyingTrait.class).applyFlyingForCurrentEntity();
+                    AgentFollowTuning.applyForCurrentEntity(plugin, npc);
                 }
                 return;
             }

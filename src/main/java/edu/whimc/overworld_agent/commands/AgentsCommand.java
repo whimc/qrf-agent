@@ -20,12 +20,13 @@ public class AgentsCommand implements CommandExecutor, TabCompleter {
     public AgentsCommand(OverworldAgent plugin) {
         subCommands.put("despawn", new DespawnAgentsCommand(plugin, "agents", "despawn"));
         subCommands.put("destroy", new DestroyAgentsCommand(plugin, "agents", "destroy"));
-        subCommands.put("spawn", new ExpertSpawnCommand(plugin, "agents", "spawn"));
+        subCommands.put("spawn", plugin.getExpertSpawnCommand());
         //subCommands.put("speechspawn", new SpeechSpawnCommand(plugin, "agent", "speechspawn"));
         subCommands.put("rebuilderspawn", new RebuilderSpawnCommand(plugin, "agents", "rebuilderspawn"));
         subCommands.put("reactivate", new SpawnAgentsCommand(plugin, "agents", "reactivate"));
         subCommands.put("skin_type", new SkinTypeCommand(plugin, "agents", "skin_type"));
         subCommands.put("chat_type", new ChangeAgentTypeCommand(plugin, "agents", "chat_type"));
+        subCommands.put("about", new AboutAgentsCommand(plugin, "agents", "about"));
     }
 
     @Override

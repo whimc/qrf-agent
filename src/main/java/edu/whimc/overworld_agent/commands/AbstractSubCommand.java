@@ -7,6 +7,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.permissions.Permission;
+import org.bukkit.permissions.PermissionDefault;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -37,12 +38,20 @@ public abstract class AbstractSubCommand {
     private boolean requiresPlayer = false;
 
     public AbstractSubCommand(OverworldAgent plugin, String baseCommand, String subCommand) {
+        this(plugin, baseCommand, subCommand, PermissionDefault.OP);
+    }
+
+    /**
+     * @param permissionDefault who may run this subcommand without an explicit grant (e.g. TRUE for public info).
+     */
+    protected AbstractSubCommand(OverworldAgent plugin, String baseCommand, String subCommand,
+            PermissionDefault permissionDefault) {
         this.plugin = plugin;
         this.baseCommand = baseCommand;
         this.subCommand = subCommand;
 
         String permStr = OverworldAgent.PERM_PREFIX + "." + baseCommand.toLowerCase() + "." + subCommand.toLowerCase();
-        Permission perm = new Permission(permStr);
+        Permission perm = new Permission(permStr, permissionDefault);
         perm.addParent(OverworldAgent.PERM_PREFIX + "." + baseCommand + ".*", true);
         Bukkit.getPluginManager().addPermission(perm);
         this.permission = perm;

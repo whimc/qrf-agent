@@ -35,6 +35,7 @@ public class ChatCommand  extends AbstractSubCommand {
             player = (Player) sender;
         }
         if(plugin.getAgentType().equals(DialogueType.GUIDE)){
+            plugin.ensureAgentEdits(player);
             Dialogue dialogue = new Dialogue(plugin, player, text, embodied);
             dialogue.doDialogue();
         } else {

@@ -1,7 +1,6 @@
 package edu.whimc.overworld_agent.utils.sql.migration.schemas;
 
 import edu.whimc.overworld_agent.utils.sql.migration.SchemaVersion;
-import org.bukkit.ChatColor;
 
 import java.sql.*;
 
@@ -20,7 +19,16 @@ public class Schema_3 extends SchemaVersion {
     protected void migrateRoutine(Connection connection) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(ADD_CATEGORY)) {
             statement.execute();
+        } catch (SQLException e) {
+            // Already applied on this database, or repair added the column before this migration ran.
+            if (!isDuplicateColumnName(e)) {
+                throw e;
+            }
         }
+    }
+
+    private static boolean isDuplicateColumnName(SQLException e) {
+        return e.getErrorCode() == 1060 || "42S21".equals(e.getSQLState());
     }
 
 }

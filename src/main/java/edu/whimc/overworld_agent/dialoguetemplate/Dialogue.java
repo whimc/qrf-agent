@@ -39,6 +39,8 @@ import org.bukkit.util.Vector;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 
@@ -59,7 +61,7 @@ public class Dialogue implements Listener {
     private boolean embodied;
     private Map<Integer, DialoguePrompt> prompts;
     public Dialogue(OverworldAgent plugin, Player player, boolean text, boolean embodied) {
-        this.spigotCallback = new SpigotCallback(plugin);
+        this.spigotCallback = plugin.getSpigotCallback();
         this.plugin = plugin;
         this.player = player;
         feedback = "";
@@ -86,26 +88,60 @@ public class Dialogue implements Listener {
     }
 
     /**
-     * Runs Journey's {@code jt} for the given destination and turns Journey configuration failures
-     * (e.g. duplicate destination keys across scopes) into a player-visible message instead of an async task exception.
+     * Runs a public server waypoint journey. Uses {@code /journey server waypoint <name_id>}, not {@code /jt}:
+     * {@code jt} is the {@code journeyto} root and only does scoped name resolution, which merges NPC/world scopes and
+     * can throw {@code IllegalStateException: Duplicate key} when keys collide; {@code journey server waypoint} uses
+     * {@link net.whimxiqal.journey.data.PublicWaypointManager#getWaypoint} directly (see Journey's grammar).
      */
     private void dispatchJourneyCommand(Player player, String rawDestination) {
         String destination = StringUtils.trimToEmpty(rawDestination);
         if (destination.isEmpty()) {
+            plugin.getLogger().fine("[OverworldAgent][Journey] dispatch skipped: empty destination for " + player.getName());
             return;
         }
-        String cmd = "jt " + quoteIfNeeded(destination);
+        // Public waypoint lookups use name_id (lowercase in SQL); keep keys stable for getWaypoint(name).
+        String nameId = destination.toLowerCase(Locale.ROOT);
+        String journeyRoot = plugin.getConfig().getString("journey.journey-command-root", "journey");
+        String cmd = journeyRoot + " server waypoint " + quoteIfNeeded(nameId);
+        plugin.getLogger().info(
+                "[OverworldAgent][Journey] dispatch as player "
+                        + player.getName()
+                        + ": /"
+                        + cmd
+                        + " (nameId="
+                        + nameId
+                        + ", raw="
+                        + rawDestination
+                        + ", journey-command-root=config:"
+                        + journeyRoot
+                        + ")");
         try {
             if (!Bukkit.dispatchCommand(player, cmd)) {
+                plugin.getLogger().warning(
+                        "[OverworldAgent][Journey] Bukkit.dispatchCommand returned **false** for "
+                                + player.getName()
+                                + ". Command line: /"
+                                + cmd
+                                + ". Common causes: (1) player lacks permission for that Journey command or for `"
+                                + journeyRoot
+                                + "`, (2) wrong `journey.journey-command-root` (must match the label players use, e.g. journey vs jo), "
+                                + "(3) the command is not registered / Journey disabled. "
+                                + "If dispatch is true but navigation still fails, Journey may have run but rejected the waypoint id—check in-game Journey messages.");
                 Utils.msgNoPrefix(player, ChatColor.RED + "Journey did not run that command. Check permissions and the destination name.");
+            } else {
+                plugin.getLogger().info(
+                        "[OverworldAgent][Journey] dispatchCommand returned true for "
+                                + player.getName()
+                                + " (Journey should handle the rest; if nothing happens, verify waypoint `"
+                                + nameId
+                                + "` exists for server public scope).");
             }
         } catch (Throwable ex) {
             plugin.getLogger().log(Level.WARNING, "Journey navigation failed for " + player.getName() + ": " + cmd, ex);
             if (throwableChainMessageContains(ex, "Duplicate key")) {
                 Utils.msgNoPrefix(player,
-                        ChatColor.RED + "Journey failed: two destinations use the same name in Journey's scopes (see server log for the id). "
-                                + "An administrator must fix Journey data so each destination key is unique—e.g. dedupe the "
-                                + "`journey_waypoints` table (`name` / `name_id`) and any NPC scope names that clash.");
+                        ChatColor.RED + "Journey failed: duplicate destination keys in Journey scopes or data (see server log). "
+                                + "An administrator should dedupe `journey_waypoints` / NPC scopes.");
             } else {
                 Utils.msgNoPrefix(player, ChatColor.RED + "Journey failed to start navigation. See the server log for details.");
             }
@@ -122,20 +158,230 @@ public class Dialogue implements Listener {
         return false;
     }
 
-    private static List<String> sortedUniqueWaypointNames(List<String> names) {
-        LinkedHashSet<String> uniq = new LinkedHashSet<>();
-        for (String n : names) {
-            if (n != null && !n.isBlank()) {
-                uniq.add(n);
+    private static final class JourneyWaypointChoice {
+        final String jtKey;
+        final String label;
+
+        JourneyWaypointChoice(String jtKey, String label) {
+            this.jtKey = jtKey;
+            this.label = (label != null && !label.isBlank()) ? label : jtKey;
+        }
+    }
+
+    private static List<JourneyWaypointChoice> sortUniqueChoices(Collection<JourneyWaypointChoice> choices) {
+        Map<String, JourneyWaypointChoice> byKey = new LinkedHashMap<>();
+        for (JourneyWaypointChoice c : choices) {
+            if (c != null && c.jtKey != null && !c.jtKey.isBlank()) {
+                byKey.putIfAbsent(c.jtKey.toLowerCase(Locale.ROOT), c);
             }
         }
-        List<String> out = new ArrayList<>(uniq);
-        out.sort(String.CASE_INSENSITIVE_ORDER);
+        List<JourneyWaypointChoice> out = new ArrayList<>(byKey.values());
+        out.sort(Comparator.comparing(c -> c.label, String.CASE_INSENSITIVE_ORDER));
         return out;
     }
 
+    /**
+     * Picks a random subset of server (public) waypoints for the guidance menu: 3–5 when enough exist,
+     * otherwise all available (1–2).
+     */
+    private static List<JourneyWaypointChoice> randomGuidanceWaypointSample(List<JourneyWaypointChoice> source) {
+        if (source == null || source.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<JourneyWaypointChoice> copy = new ArrayList<>(source);
+        Collections.shuffle(copy, ThreadLocalRandom.current());
+        int maxTake = Math.min(5, copy.size());
+        int minTake = Math.min(3, copy.size());
+        int count = (minTake == maxTake)
+                ? minTake
+                : (minTake + ThreadLocalRandom.current().nextInt(maxTake - minTake + 1));
+        return new ArrayList<>(copy.subList(0, count));
+    }
+
+    private static List<Object> flattenWaypointContainer(Object all) {
+        List<Object> out = new ArrayList<>();
+        if (all instanceof Map<?, ?> map) {
+            for (Object v : map.values()) {
+                if (v != null) {
+                    out.add(v);
+                }
+            }
+        } else if (all instanceof Iterable<?> it) {
+            for (Object v : it) {
+                if (v != null) {
+                    out.add(v);
+                }
+            }
+        }
+        return out;
+    }
+
+    private static String adventureComponentToPlain(Object component) {
+        if (component == null) {
+            return null;
+        }
+        try {
+            Class<?> serCl = Class.forName("net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer");
+            Object serializer;
+            try {
+                Method plainText = serCl.getMethod("plainText");
+                serializer = plainText.invoke(null);
+            } catch (NoSuchMethodException e) {
+                Method get = serCl.getMethod("get");
+                serializer = get.invoke(null);
+            }
+            Class<?> compCl = Class.forName("net.kyori.adventure.text.Component");
+            Method serialize = serializer.getClass().getMethod("serialize", compCl);
+            Object text = serialize.invoke(serializer, component);
+            return text == null ? null : String.valueOf(text);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static Integer journeyDomainForWorldSafe(World world) {
+        if (world == null) {
+            return null;
+        }
+        try {
+            Class<?> providerCl = Class.forName("net.whimxiqal.journey.bukkit.JourneyBukkitApiProvider");
+            Method get = providerCl.getMethod("get");
+            Object api = get.invoke(null);
+            if (api == null) {
+                return null;
+            }
+            Method toDomain = api.getClass().getMethod("toDomain", World.class);
+            Object id = toDomain.invoke(api, world);
+            if (id instanceof Integer) {
+                return (Integer) id;
+            }
+            if (id instanceof Number) {
+                return ((Number) id).intValue();
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private static Integer waypointCellDomain(Object waypoint) {
+        if (waypoint == null) {
+            return null;
+        }
+        Object cell = null;
+        for (String accessor : new String[] {"location", "cell", "getLocation", "getCell"}) {
+            try {
+                Method m = waypoint.getClass().getMethod(accessor);
+                if (m.getParameterCount() != 0) {
+                    continue;
+                }
+                cell = m.invoke(waypoint);
+                if (cell != null) {
+                    break;
+                }
+            } catch (ReflectiveOperationException ignored) {
+            }
+        }
+        if (cell == null) {
+            return null;
+        }
+        try {
+            Method domain = cell.getClass().getMethod("domain");
+            Object d = domain.invoke(cell);
+            if (d instanceof Integer) {
+                return (Integer) d;
+            }
+            if (d instanceof Number) {
+                return ((Number) d).intValue();
+            }
+        } catch (ReflectiveOperationException ignored) {
+        }
+        return null;
+    }
+
+    private static String extractWaypointJtKey(Object waypoint) {
+        if (waypoint == null) {
+            return null;
+        }
+        String[] methodNames = {"nameId", "getNameId", "getName_id", "publicNameId", "getPublicNameId", "destinationId"};
+        for (String methodName : methodNames) {
+            try {
+                Method m = waypoint.getClass().getMethod(methodName);
+                if (m.getParameterCount() != 0) {
+                    continue;
+                }
+                Object v = m.invoke(waypoint);
+                if (v == null) {
+                    continue;
+                }
+                String s = String.valueOf(v);
+                if (!s.isBlank()) {
+                    return s;
+                }
+            } catch (ReflectiveOperationException ignored) {
+            }
+        }
+        try {
+            java.lang.reflect.RecordComponent[] components = waypoint.getClass().getRecordComponents();
+            if (components != null) {
+                for (java.lang.reflect.RecordComponent rc : components) {
+                    if (!"nameId".equals(rc.getName()) && !"name_id".equals(rc.getName())) {
+                        continue;
+                    }
+                    Object v = rc.getAccessor().invoke(waypoint);
+                    if (v != null) {
+                        String s = String.valueOf(v);
+                        if (!s.isBlank()) {
+                            return s;
+                        }
+                    }
+                }
+            }
+        } catch (ReflectiveOperationException ignored) {
+        }
+        return null;
+    }
+
+    private static String extractWaypointName(Object waypoint) {
+        try {
+            Method m = waypoint.getClass().getMethod("name");
+            Object v = m.invoke(waypoint);
+            if (v != null) {
+                if (!(v instanceof String)) {
+                    String plain = adventureComponentToPlain(v);
+                    if (plain != null && !plain.isBlank()) {
+                        return plain;
+                    }
+                } else {
+                    return String.valueOf(v);
+                }
+            }
+        } catch (ReflectiveOperationException ignored) {
+        }
+        try {
+            Method m = waypoint.getClass().getMethod("getName");
+            Object v = m.invoke(waypoint);
+            return v == null ? null : String.valueOf(v);
+        } catch (ReflectiveOperationException ignored) {
+            return null;
+        }
+    }
+
+    private static JourneyWaypointChoice choiceFromWaypointObject(Object waypoint) {
+        String key = extractWaypointJtKey(waypoint);
+        if (key == null || key.isBlank()) {
+            key = extractWaypointName(waypoint);
+        }
+        if (key != null && !key.isBlank()) {
+            key = key.toLowerCase(Locale.ROOT);
+        }
+        String label = extractWaypointName(waypoint);
+        if (label == null || label.isBlank()) {
+            label = key;
+        }
+        return new JourneyWaypointChoice(key, label);
+    }
+
     private void openJourneyDestinationTextInput() {
-        this.spigotCallback.clearCallbacks(player);
         List<String> instruct = Arrays.asList(
                 Utils.color("&0&lJourney"),
                 "",
@@ -152,14 +398,29 @@ public class Dialogue implements Listener {
             }
             String destination = text.trim();
             plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Guidance"), id -> {
-                this.spigotCallback.clearCallbacks(player);
                 dispatchJourneyCommand(player, destination);
             });
         });
     }
 
+    private void openFreeDiscussionChatInput() {
+        List<String> instruct = Arrays.asList(
+                Utils.color("&0&lDiscuss"),
+                "",
+                Utils.color("&7Type what you want to say to your agent in chat."),
+                Utils.color("&7(When the LLM is enabled, this text will be sent there.)"));
+        plugin.getChatTextInputFactory().open(player, instruct, text -> {
+            if (StringUtils.isBlank(text)) {
+                Utils.msgNoPrefix(player, ChatColor.RED + "Enter a message in chat, or type cancel.");
+                openFreeDiscussionChatInput();
+                return;
+            }
+            response = StringUtils.trimToEmpty(text);
+            doResponse();
+        });
+    }
+
     private void openPlanetTagTextInput() {
-        this.spigotCallback.clearCallbacks(player);
         List<String> instruct = Arrays.asList(
                 Utils.color("&0&lObservation"),
                 "",
@@ -179,117 +440,161 @@ public class Dialogue implements Listener {
             plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Tag"), id -> {
                 Tag tag = new Tag(plugin, player, normalized);
                 tag.sendFeedback();
-                this.spigotCallback.clearCallbacks(player);
             });
         });
     }
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    private List<String> getJourneyPublicWaypointNamesSafe() {
+    /**
+     * Journey exposes {@link net.whimxiqal.journey.data.DataManager} at {@code Journey.get().proxy().dataManager()},
+     * not as {@code Journey.dataManager()} (older code assumed it lived on {@code Journey} directly).
+     */
+    private static Object journeyDataManager(Object journey) {
+        if (journey == null) {
+            return null;
+        }
+        try {
+            Method proxyMethod = journey.getClass().getMethod("proxy");
+            Object proxy = proxyMethod.invoke(journey);
+            if (proxy != null) {
+                Method dm = proxy.getClass().getMethod("dataManager");
+                return dm.invoke(proxy);
+            }
+        } catch (ReflectiveOperationException ignored) {
+        }
+        try {
+            Method legacy = journey.getClass().getMethod("dataManager");
+            return legacy.invoke(journey);
+        } catch (ReflectiveOperationException ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * Public Journey destinations for optional {@code domainFilter} (Journey world id).
+     * {@code jtKey} prefers {@code name_id}-style accessors when present; otherwise the waypoint display name.
+     */
+    private List<JourneyWaypointChoice> collectJourneyPublicWaypoints(Integer domainFilter) {
         try {
             Class<?> journeyClass = Class.forName("net.whimxiqal.journey.Journey");
             Method getMethod = journeyClass.getMethod("get");
             Object journey = getMethod.invoke(null);
-            if (journey == null) return Collections.emptyList();
+            if (journey == null) {
+                return Collections.emptyList();
+            }
 
-            Method dataManagerMethod = journey.getClass().getMethod("dataManager");
-            Object dataManager = dataManagerMethod.invoke(journey);
-            if (dataManager == null) return Collections.emptyList();
+            Object dataManager = journeyDataManager(journey);
+            if (dataManager == null) {
+                return Collections.emptyList();
+            }
 
             Method publicWaypointManagerMethod = dataManager.getClass().getMethod("publicWaypointManager");
             Object publicWaypointManager = publicWaypointManagerMethod.invoke(dataManager);
-            if (publicWaypointManager == null) return Collections.emptyList();
+            if (publicWaypointManager == null) {
+                return Collections.emptyList();
+            }
 
             Method getAllMethod = publicWaypointManager.getClass().getMethod("getAll");
             Object all = getAllMethod.invoke(publicWaypointManager);
-            if (all == null) return Collections.emptyList();
-
-            if (all instanceof Map) {
-                Map<?, ?> map = (Map<?, ?>) all;
-                List<String> names = new ArrayList<>();
-                for (Object key : map.keySet()) {
-                    if (key != null) {
-                        names.add(String.valueOf(key));
-                    }
-                }
-                return sortedUniqueWaypointNames(names);
+            if (all == null) {
+                return Collections.emptyList();
             }
 
-            if (all instanceof List) {
-                List list = (List) all;
-                List<String> names = new ArrayList<>();
-                for (Object item : list) {
-                    if (item == null) continue;
-                    String name = extractWaypointName(item);
-                    if (name != null && !name.isBlank()) {
-                        names.add(name);
+            List<JourneyWaypointChoice> choices = new ArrayList<>();
+            for (Object item : flattenWaypointContainer(all)) {
+                if (domainFilter != null) {
+                    Integer dom = waypointCellDomain(item);
+                    if (dom == null || !dom.equals(domainFilter)) {
+                        continue;
                     }
                 }
-                return sortedUniqueWaypointNames(names);
+                JourneyWaypointChoice c = choiceFromWaypointObject(item);
+                if (c.jtKey != null && !c.jtKey.isBlank()) {
+                    choices.add(c);
+                }
             }
-
-            return Collections.emptyList();
-        } catch (ClassNotFoundException ignored) {
-            return Collections.emptyList();
-        } catch (InvocationTargetException | NoSuchMethodException | IllegalAccessException e) {
+            return sortUniqueChoices(choices);
+        } catch (ClassNotFoundException | InvocationTargetException | NoSuchMethodException | IllegalAccessException ignored) {
             return Collections.emptyList();
         } catch (Throwable t) {
             return Collections.emptyList();
         }
     }
 
-    private static String extractWaypointName(Object waypoint) {
-        try {
-            Method m = waypoint.getClass().getMethod("name");
-            Object v = m.invoke(waypoint);
-            return v == null ? null : String.valueOf(v);
-        } catch (ReflectiveOperationException ignored) {
-            // continue
-        }
-        try {
-            Method m = waypoint.getClass().getMethod("getName");
-            Object v = m.invoke(waypoint);
-            return v == null ? null : String.valueOf(v);
-        } catch (ReflectiveOperationException ignored) {
-            return null;
-        }
-    }
-
     public void doDialogue() {
         plugin.relinkOwnedAgent(player);
+        plugin.ensureAgentEdits(player);
+        this.spigotCallback.clearCallbacks(player);
+        FileConfiguration cfg = plugin.getConfig();
         Utils.msgNoPrefix(player, "&lWhat do you want to discuss?", "");
-        String endResponse = plugin.getConfig().getString("template-gui.text.end-your-own-response-speech");
-        String customResponse = plugin.getConfig().getString("template-gui.text.write-your-own-response");
-        String seeDialogue = plugin.getConfig().getString("template-gui.text.see-all-responses");
-        String signHeader = plugin.getConfig().getString("template-gui.text.custom-response-sign-header");
-        String guidanceResponse = plugin.getConfig().getString("template-gui.text.guidance-response");
-        String showResponse = plugin.getConfig().getString("template-gui.text.show-response");
-        String tagScoreResponse = plugin.getConfig().getString("template-gui.text.tag-score-response");
-        String scoreResponse = plugin.getConfig().getString("template-gui.text.score-response");
-        String agentEdit = plugin.getConfig().getString("template-gui.text.agent-edit");
+        String endResponse = cfg.getString("template-gui.text.end-your-own-response-speech",
+                "&f&nClick here to stop query");
+        String customResponse = cfg.getString("template-gui.text.write-your-own-response",
+                "&f&nI want to discuss something");
+        String seeDialogue = cfg.getString("template-gui.text.see-all-responses",
+                "&f&nI want to see our conversation");
+        String signHeader = cfg.getString("template-gui.text.custom-response-sign-header",
+                "&f&nYour response");
+        String guidanceResponse = cfg.getString("template-gui.text.guidance-response",
+                "&f&nCan you show me something cool?");
+        String showResponse = cfg.getString("template-gui.text.show-response",
+                "&f&nI want to show you something unique to this environment!");
+        String tagScoreResponse = cfg.getString("template-gui.text.tag-score-response",
+                "&f&nI want to see my tag scores");
+        String scoreResponse = cfg.getString("template-gui.text.score-response",
+                "&f&nI want to see my scores");
+        String agentEdit = cfg.getString("template-gui.text.agent-edit",
+                "&f&nI want to edit my agent");
         // Agent Guidance Option
         // NOTE: Journey 1.3.x may throw when opening its GUI via plain `/jt` on some servers.
         // We avoid that by enumerating public waypoints (if available) and dispatching `jt <waypoint>`
         // which does not require opening the GUI.
         if (Bukkit.getPluginManager().getPlugin("Journey") != null) {
-            List<String> publicWaypointNames = getJourneyPublicWaypointNamesSafe();
-            if (!publicWaypointNames.isEmpty()) {
+            Integer worldDomain = journeyDomainForWorldSafe(player.getWorld());
+            // Prefer waypoints in the player's current Journey domain (same Bukkit world).
+            List<JourneyWaypointChoice> guidanceChoices = (worldDomain != null)
+                    ? collectJourneyPublicWaypoints(worldDomain)
+                    : Collections.emptyList();
+            int domainFilteredCount = guidanceChoices.size();
+            // If domain resolution fails or nothing matches (API/layout changes), fall back to all public
+            // waypoints so players still get a random short list instead of only manual chat entry.
+            final boolean sameWorldOnly = !guidanceChoices.isEmpty();
+            if (guidanceChoices.isEmpty()) {
+                guidanceChoices = collectJourneyPublicWaypoints(null);
+            }
+            if (plugin.getConfig().getBoolean("journey.debug-log", false)) {
+                plugin.getLogger().info(
+                        "[OverworldAgent][Journey] guidance menu ("
+                                + player.getName()
+                                + " world="
+                                + player.getWorld().getName()
+                                + "): journeyDomainId="
+                                + worldDomain
+                                + " publicWaypointsInDomain="
+                                + domainFilteredCount
+                                + " usedAllDomainsFallback="
+                                + (!sameWorldOnly && !guidanceChoices.isEmpty())
+                                + " finalPublicWaypointCount="
+                                + guidanceChoices.size());
+            }
+            if (!guidanceChoices.isEmpty()) {
+                final List<JourneyWaypointChoice> guidanceDisplay = randomGuidanceWaypointSample(guidanceChoices);
+                String hoverPick = sameWorldOnly
+                        ? "&aA few random places in this world — click to journey"
+                        : "&aA few random public waypoints — click to journey (not limited to this world)";
                 sendComponent(
                         player,
                         "&8" + BULLET + guidanceResponse,
-                        "&aClick here to pick a public waypoint",
+                        hoverPick,
                         p -> {
-                            this.spigotCallback.clearCallbacks(player);
-                            Utils.msgNoPrefix(player, "&lClick the location you want to go to:", "");
+                            Utils.msgNoPrefix(player, "&lPick a destination:", "");
 
-                            for (String waypointName : publicWaypointNames) {
+                            for (JourneyWaypointChoice wp : guidanceDisplay) {
                                 sendComponent(
                                         player,
-                                        "&8" + BULLET + " &r" + waypointName,
-                                        "&aClick here to select \"&r" + waypointName + "&a\"",
+                                        "&8" + BULLET + " &r" + wp.label,
+                                        "&aClick here to select \"&r" + wp.label + "&a\"",
                                         l -> this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Guidance"), id -> {
-                                            this.spigotCallback.clearCallbacks(player);
-                                            dispatchJourneyCommand(player, waypointName);
+                                            dispatchJourneyCommand(player, wp.jtKey);
                                         })
                                 );
                             }
@@ -319,7 +624,7 @@ public class Dialogue implements Listener {
                     p -> openPlanetTagTextInput()
             );
         }
-/**
+
         //Agent Score option
         sendComponent(
                 player,
@@ -328,30 +633,18 @@ public class Dialogue implements Listener {
                 p -> {
 
                     this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Progress"), id -> {
-                        Bukkit.dispatchCommand(player,  "progress");
+                        plugin.ensureStudentFeedbackSession(player);
+                        Bukkit.dispatchCommand(player, "progress");
                     });
                 });
 
-        //Agent Dialogue option
+        //Agent Dialogue option (free text → PMML / future LLM via chat, not sign)
         if (text) {
             sendComponent(
                     player,
                     "&8" + BULLET + customResponse,
-                    "&aClick here to write your own response!",
-                    p -> this.plugin.getSignMenuFactory()
-                            .newMenu(Collections.singletonList(Utils.color(signHeader)))
-                            .reopenIfFail(true)
-                            .response((signPlayer, strings) -> {
-                                response = StringUtils.join(Arrays.copyOfRange(strings, 0, strings.length), ' ').trim();
-                                response = response.toLowerCase();
-
-                                if (response.isEmpty()) {
-                                    return false;
-                                }
-                                doResponse();
-                                return true;
-                            })
-                            .open(p)
+                    "&aClick here, then type your message in chat",
+                    p -> openFreeDiscussionChatInput()
             );
         } else {
             sendComponent(
@@ -363,7 +656,7 @@ public class Dialogue implements Listener {
                         doResponse();
                     });
         }
-
+/*
         //Agent Reflection Option
         sendComponent(
                 player,
@@ -389,16 +682,20 @@ public class Dialogue implements Listener {
                     });
                 });
 */
-        int skinChange = plugin.getAgentEdits().get(player).get("Skin");
-        int nameChange = plugin.getAgentEdits().get(player).get("Name");
-        int typeChange = plugin.getAgentEdits().get(player).getOrDefault("Type", 0);
+        Map<String, Integer> edits = plugin.getAgentEdits().get(player);
+        int skinChange = edits.get("Skin");
+        int nameChange = edits.get("Name");
+        int typeChange = edits.getOrDefault("Type", 0);
+        NPC ownedForEdit = plugin.getAgents().get(player.getName());
+        boolean canEditSkin = ownedForEdit != null && ownedForEdit.isSpawned() && ownedForEdit.getEntity() != null
+                && ownedForEdit.getEntity().getType() == EntityType.PLAYER;
         if((skinChange < AGENT_EDIT_NUM || nameChange < AGENT_EDIT_NUM || typeChange < AGENT_EDIT_NUM) && embodied){
         //Agent edit Option
         sendComponent(player, "&8" + BULLET + agentEdit, "&aClick here to change me!", p -> {
             this.spigotCallback.clearCallbacks(player);
             Utils.msgNoPrefix(player, "&lClick what you want to change:", "");
 
-            if(skinChange < AGENT_EDIT_NUM) {
+            if(skinChange < AGENT_EDIT_NUM && canEditSkin) {
                 sendComponent(
                         player,
                         "&8" + BULLET + " &rSkin",
@@ -409,10 +706,11 @@ public class Dialogue implements Listener {
                             String path = "skins."+plugin.getSkinType();
                             for (String key : config.getConfigurationSection(path).getKeys(false)) {
                                 ConfigurationSection section = config.getConfigurationSection(path + "." + key);
-                                String label = section.getString("dialogue_option");
+                                String labelOpt = section.getString("dialogue_option");
+                                final String label = (labelOpt == null || labelOpt.isBlank()) ? key : labelOpt;
                                 String signature = section.getString("signature");
                                 String data = section.getString("data");
-                                String skinName = key;
+                                final String skinName = key;
                                 sendComponent(
                                         player,
                                         "&8" + BULLET + " &r" + label,
@@ -465,7 +763,17 @@ public class Dialogue implements Listener {
                                         plugin.getAgentEdits().get(player).replace("Name",nameChange+1);
                                         int numLeft = AGENT_EDIT_NUM - plugin.getAgentEdits().get(player).get("Name");
                                         player.sendMessage("Your agent's name has been changed to " + finalAgentName + ".\n You have " + numLeft + " name edits left.");
-                                        plugin.getQueryer().storeNewAgent(player, "edit", finalAgentName, npc.getOrAddTrait(SkinTrait.class).getSkinName(), id2 -> {
+                                        String appearanceForDb;
+                                        if (npc.isSpawned() && npc.getEntity() != null
+                                                && npc.getEntity().getType() == EntityType.PLAYER) {
+                                            SkinTrait st = npc.getTrait(SkinTrait.class);
+                                            appearanceForDb = st != null ? st.getSkinName() : "";
+                                        } else if (npc.isSpawned() && npc.getEntity() != null) {
+                                            appearanceForDb = npc.getEntity().getType().name();
+                                        } else {
+                                            appearanceForDb = "";
+                                        }
+                                        plugin.getQueryer().storeNewAgent(player, "edit", finalAgentName, appearanceForDb, id2 -> {
                                             plugin.getAgents().put(player.getName(), npc);
                                         });
                                     } else {
@@ -516,6 +824,8 @@ public class Dialogue implements Listener {
                                             if (!npc.isSpawned()) {
                                                 npc.spawn(respawnAt);
                                             }
+                                            npc.getOrAddTrait(AgentPermanentFlyingTrait.class).applyFlyingForCurrentEntity();
+                                            npc.getOrAddTrait(FollowTrait.class).follow(player);
 
                                             plugin.getAgentEdits().get(player).put("Type", typeChange + 1);
                                             int numLeft = AGENT_EDIT_NUM - plugin.getAgentEdits().get(player).get("Type");
@@ -534,18 +844,23 @@ public class Dialogue implements Listener {
         });}
     }
 
-/**
+
     private void doResponse() {
         DialoguePrompt prompt = null;
 
             Chatbot chatbot = new Chatbot(response);
-            double[] prediction = chatbot.predict();
+            double[] prediction = chatbot.classifyDialogueIntent();
             int predictedClass = (int) prediction[0];
             double certainty = prediction[1];
             if (certainty > THRESHOLD) {
                 prompt = prompts.get(predictedClass);
-                feedback = prompt.getFeedback();
-                this.fillIn();
+                if (prompt == null) {
+                    prompt = prompts.get(UNKNOWN_LABEL);
+                    feedback = prompt.getFeedback();
+                } else {
+                    feedback = prompt.getFeedback();
+                    this.fillIn();
+                }
                 if (prompt.getPrompt().equalsIgnoreCase("quest")) {
                     int ctr = 0;
                     Quests qp = (Quests) Bukkit.getServer().getPluginManager().getPlugin("Quests");
@@ -558,20 +873,13 @@ public class Dialogue implements Listener {
                     }
 
                 } else if (prompt.getPrompt().equalsIgnoreCase("guidance")) {
-                    DialoguePrompt finalPrompt = prompt;
                     String destination = StringUtils.trimToEmpty(response);
                     feedback = feedback.replace("{LOCATION}", destination);
                     if(destination.equals("")){
                         feedback = "Sorry, I could not find that location";
                     } else {
                         String finalDestination = destination;
-                        Bukkit.getScheduler().runTask(plugin, () -> {
-                            String cmdDestination = finalDestination;
-                            if (cmdDestination.contains(" ")) {
-                                cmdDestination = "\"" + cmdDestination + "\"";
-                            }
-                            Bukkit.dispatchCommand(player, finalPrompt.getTool() + " " + cmdDestination);
-                        });
+                        Bukkit.getScheduler().runTask(plugin, () -> dispatchJourneyCommand(player, finalDestination));
                     }
                 } else if (prompt.getPrompt().equalsIgnoreCase("npcs")) {
                     int ctr = 0;
@@ -601,19 +909,43 @@ public class Dialogue implements Listener {
         String finalResponse = response;
         //Janky but waits until event is done before stores in db
         DialoguePrompt finalPrompt1 = prompt;
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            this.plugin.getQueryer().storeNewScienceInquiry(player, finalResponse, feedback, id -> {
+        final String[] feedbackOut = {feedback};
+
+        Runnable storeAndSend = () -> Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            this.plugin.getQueryer().storeNewScienceInquiry(player, finalResponse, feedbackOut[0], id -> {
                 this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Dialogue"), id2 -> {
-                    this.spigotCallback.clearCallbacks(player);
-                    if (!finalPrompt1.getPrompt().equalsIgnoreCase("science_tool")) {
-                        player.sendMessage(feedback);
+                    if (finalPrompt1 != null && !finalPrompt1.getPrompt().equalsIgnoreCase("science_tool")) {
+                        player.sendMessage(feedbackOut[0]);
                     }
                 });
             });
         }, 20L);
 
+        if (plugin.getConfig().getBoolean("llm.use-for-reply", false)
+                && plugin.getLlmProvider() != null
+                && plugin.getLlmProvider().isConfigured()) {
+            String systemPrompt = plugin.augmentLlmSystemPrompt(plugin.getConfig().getString("llm.system-prompt",
+                    "You are a friendly in-game science education assistant. "
+                            + "Answer clearly and briefly; keep content appropriate for students."));
+            CompletableFuture.supplyAsync(() -> {
+                try {
+                    return chatbot.generateLlmReply(plugin.getLlmProvider(), systemPrompt);
+                } catch (Exception ex) {
+                    plugin.getLogger().warning("LLM reply failed: " + ex.getMessage());
+                    return null;
+                }
+            }).thenAccept(llmText -> Bukkit.getScheduler().runTask(plugin, () -> {
+                if (llmText != null && !llmText.isBlank()) {
+                    feedbackOut[0] = llmText;
+                }
+                storeAndSend.run();
+            }));
+        } else {
+            storeAndSend.run();
+        }
+
     }
-*/
+
     private void sendComponent(Player player, String text, String hoverText, Consumer<Player> onClick) {
         player.spigot().sendMessage(createComponent(text, hoverText, onClick));
     }
@@ -628,8 +960,8 @@ public class Dialogue implements Listener {
     private void addCallback(TextComponent component, UUID playerUUID, Consumer<Player> onClick) {
         this.spigotCallback.createCommand(playerUUID, component, onClick);
     }
-/**
-    public void fillIn() {
+
+    private void fillIn() {
         feedback = feedback.replace("{NAME}", player.getName());
         feedback = feedback.replace("{PLANET}", player.getWorld().getName());
         if (plugin.getAgents().get(player.getName()) != null) {
@@ -637,6 +969,7 @@ public class Dialogue implements Listener {
         }
     }
 
+    /*
     @EventHandler
     public void onToolUse(ScienceToolMeasureEvent measure) {
         Player eventPlayer = measure.getMeasurement().getPlayer();

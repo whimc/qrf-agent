@@ -4,8 +4,12 @@ import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.utils.sql.migration.SchemaManager;
 
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.logging.Level;
 
 public class MySQLConnection {
 
@@ -39,7 +43,50 @@ public class MySQLConnection {
         }
 
         SchemaManager manager = new SchemaManager(this.plugin, this.connection);
-        return manager.initialize();
+        if (!manager.initialize()) {
+            return false;
+        }
+        repairDriftedDialogScienceColumns();
+        return true;
+    }
+
+    /**
+     * Migration progress is stored in {@code plugins/.../.schema_version}, but the actual MySQL schema may
+     * lag (shared DB, restored dump, manual edits). Ensure columns the query layer expects exist.
+     */
+    private void repairDriftedDialogScienceColumns() {
+        try {
+            if (!tableExists(this.connection, "whimc_dialog_science")) {
+                return;
+            }
+            if (columnExists(this.connection, "whimc_dialog_science", "agent_response")) {
+                return;
+            }
+            plugin.getLogger().info(
+                    "Adding missing column whimc_dialog_science.agent_response (database out of sync with local schema version).");
+            try (Statement st = this.connection.createStatement()) {
+                st.executeUpdate("ALTER TABLE whimc_dialog_science ADD COLUMN agent_response TEXT");
+            }
+        } catch (SQLException e) {
+            plugin.getLogger().log(Level.WARNING,
+                    "Could not add whimc_dialog_science.agent_response — dialogue logging may fail until the DB is fixed.", e);
+        }
+    }
+
+    private static boolean tableExists(Connection connection, String table) throws SQLException {
+        DatabaseMetaData meta = connection.getMetaData();
+        String catalog = connection.getCatalog();
+        try (ResultSet rs = meta.getTables(catalog, null, table, new String[] { "TABLE" })) {
+            return rs.next();
+        }
+    }
+
+    private static boolean columnExists(Connection connection, String table, String column) throws SQLException {
+        DatabaseMetaData meta = connection.getMetaData();
+        String catalog = connection.getCatalog();
+        try (ResultSet rs = meta.getColumns(catalog, null, table, column)) {
+            return rs.next();
+        }
     }
 
     public Connection getConnection() {

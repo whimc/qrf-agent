@@ -2,6 +2,7 @@ package edu.whimc.overworld_agent.commands.subcommands;
 
 import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.commands.AbstractSubCommand;
+import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import edu.whimc.overworld_agent.traits.SpawnExpertTrait;
 import net.citizensnpcs.api.CitizensAPI;
@@ -80,7 +81,7 @@ public class SpeechSpawnCommand extends AbstractSubCommand {
             NPC npc = registry.createNPC(EntityType.PLAYER, npcName);
             npc.getOrAddTrait(FollowTrait.class).follow(player);
             npc.getOrAddTrait(LookClose.class).setDisableWhileNavigating(true);
-            npc.getNavigator().getLocalParameters().range(15);
+            AgentFollowTuning.applyForPlannedType(plugin, npc, EntityType.PLAYER);
             SpawnExpertTrait trait = new SpawnExpertTrait();
             trait.setPlayer(player);
             trait.setInputType(false);

@@ -36,7 +36,7 @@ public class BuilderDialogue {
     public BuilderDialogue(OverworldAgent plugin, Player player, boolean embodied){
         this.plugin = plugin;
         this.player = player;
-        this.spigotCallback = new SpigotCallback(plugin);
+        this.spigotCallback = plugin.getSpigotCallback();
         this.makingTemplate = false;
         this.embodied = embodied;
         log = Logger.getLogger("Minecraft");

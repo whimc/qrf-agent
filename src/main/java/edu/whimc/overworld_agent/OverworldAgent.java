@@ -3,10 +3,16 @@ package edu.whimc.overworld_agent;
 import com.jyckos.speechreceiver.SpeechReceiver;
 import edu.whimc.observations.models.Observation;
 import edu.whimc.overworld_agent.commands.*;
+import edu.whimc.overworld_agent.commands.subcommands.ExpertSpawnCommand;
 import edu.whimc.overworld_agent.dialoguetemplate.BuilderDialogue;
 import edu.whimc.overworld_agent.dialoguetemplate.ChatTextInputFactory;
+import edu.whimc.overworld_agent.dialoguetemplate.SpigotCallback;
 import edu.whimc.overworld_agent.dialoguetemplate.SignMenuFactory;
 import edu.whimc.overworld_agent.dialoguetemplate.Tag;
+import edu.whimc.overworld_agent.dialoguetemplate.models.LlmProvider;
+import edu.whimc.overworld_agent.dialoguetemplate.models.NoOpLlmProvider;
+import edu.whimc.overworld_agent.dialoguetemplate.models.llm.LlmProviderFactory;
+import edu.whimc.overworld_agent.dialoguetemplate.models.llm.LlmRagContextBuilder;
 import edu.whimc.overworld_agent.dialoguetemplate.models.BuildTemplate;
 import edu.whimc.overworld_agent.dialoguetemplate.models.DialogueType;
 import edu.whimc.overworld_agent.utils.sql.Queryer;
@@ -22,11 +28,16 @@ import edu.whimc.overworld_agent.traits.*;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
 
+import java.lang.reflect.Method;
+
 import java.awt.*;
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.List;
 import java.util.logging.Level;
@@ -47,6 +58,10 @@ public class OverworldAgent extends JavaPlugin {
     private List<String> profanity;
     private SignMenuFactory signMenuFactory;
     private ChatTextInputFactory chatTextInputFactory;
+    /** Single instance; {@link edu.whimc.overworld_agent.dialoguetemplate.Dialogue} registers clicks here (see /oacallback). */
+    private SpigotCallback spigotCallback;
+    private LlmProvider llmProvider = new NoOpLlmProvider();
+    private ExpertSpawnCommand expertSpawnCommand;
     private HashMap<Player,Long> sessions;
     //private SpeechReceiver receiver;
     private HashMap<Player,HashMap<String,Integer>> agentEdits;
@@ -100,6 +115,8 @@ public class OverworldAgent extends JavaPlugin {
         net.citizensnpcs.api.CitizensAPI.getTraitFactory().registerTrait(net.citizensnpcs.api.trait.TraitInfo.create(SpawnExpertTrait.class).withName("expertagentspawn"));
         net.citizensnpcs.api.CitizensAPI.getTraitFactory().registerTrait(net.citizensnpcs.api.trait.TraitInfo.create(AgentPermanentFlyingTrait.class).withName("agentpermanentflying"));
 
+        expertSpawnCommand = new ExpertSpawnCommand(this, "agents", "spawn");
+
         AgentCommand agentCommand = new AgentCommand(this);
         getCommand("agent").setExecutor(agentCommand);
         getCommand("agent").setTabCompleter(agentCommand);
@@ -121,9 +138,41 @@ public class OverworldAgent extends JavaPlugin {
             getCommand("oacallback").setExecutor((sender, command, label, args) -> true);
         }
 
+        spigotCallback = new SpigotCallback(this);
         signMenuFactory = new SignMenuFactory(this);
         chatTextInputFactory = new ChatTextInputFactory(this);
+        try {
+            Files.createDirectories(LlmRagContextBuilder.resolveContextRoot(this));
+        } catch (IOException e) {
+            getLogger().log(Level.FINE, "LLM context directory not created yet: " + e.getMessage());
+        }
+        setupLlmFromConfig();
         getServer().getPluginManager().registerEvents(new Listeners(this), this);
+    }
+
+    private void setupLlmFromConfig() {
+        setLlmProvider(LlmProviderFactory.create(this));
+        LlmProvider p = getLlmProvider();
+        String name = getConfig().getString("llm.provider", "none");
+        if (p.isConfigured()) {
+            getLogger().info("LLM provider ready (" + name + ").");
+        } else if (name != null && !name.isBlank() && !"none".equalsIgnoreCase(name.trim())) {
+            getLogger().warning("LLM provider '" + name + "' is not configured (check llm.api-key / llm.api-key-env / llm.model).");
+        }
+    }
+
+    /**
+     * Directory for RAG text files ({@code llm.context-directory} under the plugin data folder). Created on enable when possible.
+     */
+    public Path getLlmContextDirectory() {
+        return LlmRagContextBuilder.resolveContextRoot(this);
+    }
+
+    /**
+     * When {@code llm.rag.enabled} is true, appends bounded excerpts from {@link #getLlmContextDirectory()} to the system prompt.
+     */
+    public String augmentLlmSystemPrompt(String baseSystemPrompt) {
+        return LlmRagContextBuilder.appendIfEnabled(this, baseSystemPrompt);
     }
 
 
@@ -162,10 +211,73 @@ public class OverworldAgent extends JavaPlugin {
         return chatTextInputFactory;
     }
 
+    public SpigotCallback getSpigotCallback() {
+        return spigotCallback;
+    }
+
+    /**
+     * LLM backend for natural chat replies ({@code llm.use-for-reply} in config). On startup this is set from
+     * {@code llm.provider} (OpenAI, Gemini, OpenAI-compatible local). Call {@link #setLlmProvider(LlmProvider)}
+     * from another plugin to override.
+     */
+    public LlmProvider getLlmProvider() {
+        return llmProvider;
+    }
+
+    public void setLlmProvider(LlmProvider llmProvider) {
+        this.llmProvider = llmProvider != null ? llmProvider : new NoOpLlmProvider();
+    }
+
+    public ExpertSpawnCommand getExpertSpawnCommand() {
+        return expertSpawnCommand;
+    }
+
+    /**
+     * Ensures edit quotas exist (join handler normally creates them; this covers late loads or edge cases).
+     */
+    public void ensureAgentEdits(Player player) {
+        if (player == null) {
+            return;
+        }
+        agentEdits.computeIfAbsent(player, p -> {
+            HashMap<String, Integer> e = new HashMap<>();
+            e.put("Name", 0);
+            e.put("Skin", 0);
+            e.put("Type", 0);
+            return e;
+        });
+    }
+
     /**
      * Re-populates {@link #agents} after restart or reconnect by scanning Citizens NPCs with
      * {@link SpawnExpertTrait} / {@link RebuilderTrait} (in-memory map is not persisted).
      */
+    /**
+     * Ensures {@code WHIMC-StudentFeedback} has a session start time for this player.
+     * {@code ProgressCommand} returns without output when {@code sessionStart == null}.
+     */
+    public void ensureStudentFeedbackSession(Player player) {
+        if (player == null || Bukkit.getPluginManager().getPlugin("WHIMC-StudentFeedback") == null) {
+            return;
+        }
+        try {
+            Class<?> cl = Class.forName("edu.whimc.feedback.StudentFeedback");
+            Method getInstance = cl.getMethod("getInstance");
+            Object plugin = getInstance.invoke(null);
+            if (plugin == null) {
+                return;
+            }
+            Method getSessions = cl.getMethod("getPlayerSessions");
+            Object sessions = getSessions.invoke(plugin);
+            if (sessions instanceof Map<?, ?> map) {
+                @SuppressWarnings("unchecked")
+                Map<Player, Object> typed = (Map<Player, Object>) map;
+                typed.putIfAbsent(player, System.currentTimeMillis());
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
     public void relinkOwnedAgent(Player player) {
         if (player == null) {
             return;

@@ -2,6 +2,7 @@ package edu.whimc.overworld_agent.commands.subcommands;
 
 import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.commands.AbstractSubCommand;
+import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import edu.whimc.overworld_agent.traits.RebuilderTrait;
 import edu.whimc.overworld_agent.traits.SpawnExpertTrait;
 import net.citizensnpcs.api.CitizensAPI;
@@ -60,7 +61,7 @@ public class RebuilderSpawnCommand extends AbstractSubCommand {
             npc.getOrAddTrait(FollowTrait.class).follow(player);
             npc.getOrAddTrait(Equipment.class);
             npc.getOrAddTrait(LookClose.class).setDisableWhileNavigating(true);
-            npc.getNavigator().getLocalParameters().range(15);
+            AgentFollowTuning.applyForPlannedType(plugin, npc, EntityType.PLAYER);
             String path = "skins."+plugin.getSkinType();
             //Set NPC skin by grabbing values from config
             String signature = plugin.getConfig().getString(path + "." + SKIN + ".signature");
@@ -71,6 +72,7 @@ public class RebuilderSpawnCommand extends AbstractSubCommand {
             npc.addTrait(trait);
             plugin.getQueryer().storeNewAgent(player, COMMAND, "Builder", "Builder", id -> {
                 npc.spawn(player.getLocation());
+                npc.getOrAddTrait(FollowTrait.class).follow(player);
                 plugin.getAgents().put(player.getName(), npc);
             });
         } else {

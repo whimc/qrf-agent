@@ -4,7 +4,7 @@ description: ${project.description}
 author: Sam Hum
 api-version: 1.21
 main: edu.whimc.overworld_agent.OverworldAgent
-softdepend: [Citizens,ProtocolLib,WHIMC-ScienceTools,Journey,SpeechReceiver,HolographicDisplays,CoreProtect]
+softdepend: [Citizens,ProtocolLib,WHIMC-ScienceTools,Journey,SpeechReceiver,HolographicDisplays,CoreProtect,WHIMC-StudentFeedback]
 commands:
   agent:
     description: agent command for dialogue
