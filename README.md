@@ -29,7 +29,24 @@ $ mvn install
 ---
 
 ## Configuration
-The config file can be found under `/Overworld-Agent/src/main/resources/config.yml`.
+The base config file can be found under `/Overworld-Agent/src/main/resources/config.yml`.
+An example config file can be found under `/Overworld-Agent/example-config.yml`.
+
+### Skins
+| Key | Type | Description |
+|---|---|---|
+|`skins.<skin name>`|`string`|Unique name for the skin can be made up by the researcher|
+|`skins.<skin name>.signature`|`string`|The texture signature of the custom skin from https://mineskin.org|
+|`skins.<skin name>.data`|`string`|The texture value of the custom skin from https://mineskin.org|
+
+#### Example
+```yaml
+skins:
+  <skin name>:
+    signature: <texture signature of custom skin>
+    data: <texture value of custom skin>
+```
+
 
 ### Local dialogue classifier (bundled PMML)
 
@@ -45,22 +62,6 @@ Free-text player lines (e.g. **Discuss something** / chat input) are **not** han
 So answers like “what’s your name?” work because the model maps the sentence to a label (e.g. **agent** / `label: 0`) whose feedback template includes something like `My name is {AGENT}.` That is **intent routing + templates**, not open-ended generation.
 
 Replacing or retraining the classifier means supplying a new **`model.pmml`** (and keeping **`prompts` labels** aligned with the model’s output classes). The PMML file is large and is treated as an **opaque artifact** in this repo.
-
-### Skins
-| Key | Type | Description |
-|---|---|---|
-|`skins.<skin name>`|`string`|Unique name for the skin can be made up by the researcher|
-|`skins.<skin name>.signature`|`string`|The texture signature of the custom skin from https://mineskin.org|
-|`skins.<skin name>.data`|`string`|The texture value of the custom skin from https://mineskin.org|
-
-
-#### Example
-```yaml
-skins:
-  <skin name>:
-    signature: <texture signature of custom skin>
-    data: <texture value of custom skin>
-```
 
 ### LLM chatbot (optional)
 
@@ -171,13 +172,13 @@ Permissions follow **`whimc-agent.<base>.<subcommand>`** (each `/agents …` sub
 
 ### Root commands (`plugin.yml`)
 
-| Command | Typical use |
-|---------|-------------|
-| **`/agents`** | Admin / spawn / builder — requires a subcommand (see below). |
-| **`/agent`** | Player **`chat`** or **`spawn`** (same spawn behavior as `/agents spawn`). |
-| **`/admintags`** | Manage dialogue tags (`TagAdminCommand`). |
-| **`/assess-habitat`** | Habitat assessment command. |
-| **`/oacallback`** | **Internal** — clickable chat UI callbacks; not for players to run manually. |
+| Command | Typical use                                                                                      |
+|---------|--------------------------------------------------------------------------------------------------|
+| **`/agents`** | Admin / spawn / builder — requires a subcommand (see below).                                     |
+| **`/agent`** | Player **`chat`** or **`spawn`** (same spawn behavior as `/agents spawn`).                       |
+| **`/admintags`** | Manage dialogue tags (`TagAdminCommand`).                                                        |
+| **`/assess-habitat`** | Habitat assessment command. Only works with ML-API and routing pythong script on server running. |
+| **`/oacallback`** | **Internal** — clickable chat UI callbacks; not for players to run manually.                     |
 
 ### `/agents` subcommands (current code)
 
