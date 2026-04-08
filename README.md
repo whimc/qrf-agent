@@ -233,8 +233,9 @@ Use these as **`<skin>`** after **`player`**; names are **lowercase** and must m
 | Guidance (“something cool”) | If **Journey** is present: shows a **random subset** (3–5 when available) of **server public** waypoints (world-scoped when Journey domain mapping works, otherwise all public). Each choice runs **`/<journey-command-root> server waypoint <name_id>`** as the player (default root `journey` from `config.yml`; must match how Journey registers its command, e.g. `jo`). Requires the player to **have permission** for that command. **Console:** each dispatch is logged at `INFO`; if `dispatchCommand` returns `false`, a **`WARNING`** explains common causes. Set **`journey.debug-log: true`** for extra logs when opening the menu (domain id, waypoint counts, fallback). If there are no public waypoints, falls back to **chat** entry for a destination. |
 | Free discussion | **Chat input** (not a sign): type what you want to say; routed through **`doResponse()`** (PMML intent today; **`llm.use-for-reply`** when an `LlmProvider` is registered). |
 | Scores | Runs **`/progress`** (e.g. **WHIMC-StudentFeedback**); session is ensured when possible. |
-| Tagging | Pattern-matched **chat** feedback when tags are configured for the world and under the tag limit. |
 | Edit | **Embodied** agents only: change **name**, **entity type** (`player` vs Animals list), and **skin** when the NPC is a **player** model (up to configured edit limits). |
+
+*(Planet **tagging** chat from the dialogue menu is commented out in `Dialogue#doDialogue`; `/admintags` and `Tag.java` remain for operators who still manage tag data.)*
 
 ### Builder
 | Dialogue Option | Description                                                                                                                                                                                                    |

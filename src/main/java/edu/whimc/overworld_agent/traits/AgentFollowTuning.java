@@ -31,6 +31,10 @@ public final class AgentFollowTuning {
             double margin = plugin.getConfig().getDouble(CFG_PLAYER_MARGIN, 2.5);
             npc.getNavigator().getDefaultParameters().range(range);
             npc.getNavigator().getLocalParameters().range(range);
+            // After a mob agent, default params may still carry low straight-line thresholds — ground NPCs need pathfinding.
+            float straight = Math.max(range, 32.0f);
+            npc.getNavigator().getDefaultParameters().straightLineTargetingDistance(straight);
+            npc.getNavigator().getLocalParameters().straightLineTargetingDistance(straight);
             ft.setFollowingMargin(margin);
         } else {
             float range = (float) plugin.getConfig().getDouble(CFG_MOB_RANGE, 5);

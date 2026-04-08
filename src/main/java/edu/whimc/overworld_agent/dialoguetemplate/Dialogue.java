@@ -420,6 +420,7 @@ public class Dialogue implements Listener {
         });
     }
 
+    /*
     private void openPlanetTagTextInput() {
         List<String> instruct = Arrays.asList(
                 Utils.color("&0&lObservation"),
@@ -443,6 +444,7 @@ public class Dialogue implements Listener {
             });
         });
     }
+    */
 
     /**
      * Journey exposes {@link net.whimxiqal.journey.data.DataManager} at {@code Journey.get().proxy().dataManager()},
@@ -536,10 +538,11 @@ public class Dialogue implements Listener {
                 "&f&nYour response");
         String guidanceResponse = cfg.getString("template-gui.text.guidance-response",
                 "&f&nCan you show me something cool?");
-        String showResponse = cfg.getString("template-gui.text.show-response",
-                "&f&nI want to show you something unique to this environment!");
-        String tagScoreResponse = cfg.getString("template-gui.text.tag-score-response",
-                "&f&nI want to see my tag scores");
+        // Tagging (planet observation) menu — disabled; see git history / Tag.java to restore.
+        // String showResponse = cfg.getString("template-gui.text.show-response",
+        //         "&f&nI want to show you something unique to this environment!");
+        // String tagScoreResponse = cfg.getString("template-gui.text.tag-score-response",
+        //         "&f&nI want to see my tag scores");
         String scoreResponse = cfg.getString("template-gui.text.score-response",
                 "&f&nI want to see my scores");
         String agentEdit = cfg.getString("template-gui.text.agent-edit",
@@ -610,20 +613,21 @@ public class Dialogue implements Listener {
                 );
             }
         }
-        //Agent Tag option
-        Map<Player, Map<World, Integer>> playerTags = Tag.getPlayerTags();
-        int numTags = 0;
-        if(playerTags.get(player) != null && playerTags.get(player).get(player.getWorld()) != null){
-            numTags = playerTags.get(player).get(player.getWorld());
-        }
-        if (Tag.maxTags(player.getWorld()) != null && numTags < Tag.maxTags(player.getWorld()) && Tag.getDialogueTags().get(player.getWorld()) != null) {
-            sendComponent(
-                    player,
-                    "&8" + BULLET + showResponse,
-                    "&aClick here to show or ask about something unique (chat)",
-                    p -> openPlanetTagTextInput()
-            );
-        }
+        // Agent Tag option (disabled)
+        // Map<Player, Map<World, Integer>> playerTags = Tag.getPlayerTags();
+        // int numTags = 0;
+        // if (playerTags.get(player) != null && playerTags.get(player).get(player.getWorld()) != null) {
+        //     numTags = playerTags.get(player).get(player.getWorld());
+        // }
+        // if (Tag.maxTags(player.getWorld()) != null && numTags < Tag.maxTags(player.getWorld())
+        //         && Tag.getDialogueTags().get(player.getWorld()) != null) {
+        //     sendComponent(
+        //             player,
+        //             "&8" + BULLET + showResponse,
+        //             "&aClick here to show or ask about something unique (chat)",
+        //             p -> openPlanetTagTextInput()
+        //     );
+        // }
 
         //Agent Score option
         sendComponent(
@@ -657,7 +661,7 @@ public class Dialogue implements Listener {
                     });
         }
 /*
-        //Agent Reflection Option
+        //Agent Reflection Option (disabled)
         sendComponent(
                 player,
                 "&8" + BULLET + seeDialogue,

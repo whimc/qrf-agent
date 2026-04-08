@@ -42,6 +42,8 @@ public class AgentPermanentFlyingTrait extends Trait {
 
     /**
      * Applies gravity/flight state from the live entity type (after mob type changes and respawn).
+     * <p>Player-shaped NPCs: do not use Citizens {@link Gravity} (it fights vanilla walking + {@link FollowTrait} on
+     * modern Paper). Mob agents keep no-gravity hover behavior.
      */
     public void applyFlyingForCurrentEntity() {
         if (!npc.isSpawned() || npc.getEntity() == null) {
@@ -50,24 +52,32 @@ public class AgentPermanentFlyingTrait extends Trait {
         EntityType type = npc.getEntity().getType();
         boolean nonPlayer = type != EntityType.PLAYER;
 
-        Gravity gravity = npc.getOrAddTrait(Gravity.class);
-        gravity.setHasGravity(!nonPlayer);
-
-        if (npc.getEntity() instanceof Player player) {
-            player.setFlying(false);
-            player.setAllowFlight(false);
+        if (!nonPlayer) {
+            npc.setFlyable(false);
+            if (npc.hasTrait(Gravity.class)) {
+                npc.removeTrait(Gravity.class);
+            }
+            if (npc.getEntity() instanceof Player player) {
+                player.setFlying(false);
+                player.setAllowFlight(false);
+            }
+            float baseline = npc.getNavigator().getDefaultParameters().speed();
+            npc.getNavigator().getLocalParameters().speedModifier(baseline);
+            if (npc.hasTrait(FollowTrait.class)) {
+                AgentFollowTuning.applyForCurrentEntity(plugin, npc);
+            }
+            return;
         }
 
-        float baseline = npc.getNavigator().getDefaultParameters().speed();
-        npc.setFlyable(nonPlayer);
+        Gravity gravity = npc.getOrAddTrait(Gravity.class);
+        gravity.setHasGravity(false);
 
-        if (nonPlayer) {
-            double mult = plugin.getConfig().getDouble(CONFIG_SPEED_MULT_KEY, 1.65);
-            if (mult > 0) {
-                npc.getNavigator().getLocalParameters().speedModifier(baseline * (float) mult);
-            } else {
-                npc.getNavigator().getLocalParameters().speedModifier(baseline);
-            }
+        float baseline = npc.getNavigator().getDefaultParameters().speed();
+        npc.setFlyable(true);
+
+        double mult = plugin.getConfig().getDouble(CONFIG_SPEED_MULT_KEY, 1.65);
+        if (mult > 0) {
+            npc.getNavigator().getLocalParameters().speedModifier(baseline * (float) mult);
         } else {
             npc.getNavigator().getLocalParameters().speedModifier(baseline);
         }
