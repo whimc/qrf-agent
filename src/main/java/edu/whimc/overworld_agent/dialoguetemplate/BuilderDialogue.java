@@ -8,6 +8,7 @@ import com.sk89q.worldguard.protection.managers.RegionManager;
 import com.sk89q.worldguard.protection.regions.ProtectedRegion;
 import com.sk89q.worldguard.protection.regions.RegionContainer;
 import edu.whimc.overworld_agent.OverworldAgent;
+import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import edu.whimc.overworld_agent.dialoguetemplate.events.BuildAssessEvent;
 import edu.whimc.overworld_agent.dialoguetemplate.models.BuildTemplate;
 import edu.whimc.overworld_agent.utils.Utils;
@@ -281,7 +282,7 @@ public class BuilderDialogue {
                         p -> {
                             this.plugin.getQueryer().storeNewBuildInteraction(new Interaction(plugin, player, "Following Agent"), -1, id -> {
                                 this.id = id;
-                                agent.getOrAddTrait(FollowTrait.class).follow(player);
+                                AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, agent, player);
                                 player.sendMessage("Let's go continue building!");
                                 this.spigotCallback.clearCallbacks(player);
                             });

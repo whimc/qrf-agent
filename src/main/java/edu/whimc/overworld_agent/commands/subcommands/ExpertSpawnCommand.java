@@ -125,7 +125,6 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
             }
 
             NPC npc = registry.createNPC(entityType, npcName);
-            npc.getOrAddTrait(FollowTrait.class).follow(player);
             npc.getOrAddTrait(LookClose.class).setDisableWhileNavigating(true);
             AgentFollowTuning.applyForPlannedType(plugin, npc, entityType);
             SpawnExpertTrait trait = new SpawnExpertTrait();
@@ -145,7 +144,7 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
             String agentSkinOrType = entityType == EntityType.PLAYER ? skinName : entityType.name();
             plugin.getQueryer().storeNewAgent(player, COMMAND, npcName, agentSkinOrType, id -> {
                 npc.spawn(player.getLocation());
-                npc.getOrAddTrait(FollowTrait.class).follow(player);
+                AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
                 plugin.getAgents().put(player.getName(), npc);
             });
             return true;

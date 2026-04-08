@@ -4,6 +4,7 @@ package edu.whimc.overworld_agent.dialoguetemplate;
 
 
 import edu.whimc.overworld_agent.OverworldAgent;
+import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import edu.whimc.overworld_agent.dialoguetemplate.models.Chatbot;
 import edu.whimc.overworld_agent.dialoguetemplate.models.DialoguePrompt;
@@ -829,7 +830,8 @@ public class Dialogue implements Listener {
                                                 npc.spawn(respawnAt);
                                             }
                                             npc.getOrAddTrait(AgentPermanentFlyingTrait.class).applyFlyingForCurrentEntity();
-                                            npc.getOrAddTrait(FollowTrait.class).follow(player);
+                                            AgentFollowTuning.applyForCurrentEntity(plugin, npc);
+                                            AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
 
                                             plugin.getAgentEdits().get(player).put("Type", typeChange + 1);
                                             int numLeft = AGENT_EDIT_NUM - plugin.getAgentEdits().get(player).get("Type");

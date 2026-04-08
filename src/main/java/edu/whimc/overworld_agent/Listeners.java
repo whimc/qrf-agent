@@ -1,9 +1,9 @@
 package edu.whimc.overworld_agent;
 
+import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
-import net.citizensnpcs.trait.FollowTrait;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
@@ -82,8 +82,7 @@ public class Listeners  implements Listener {
         if(npc != null) {
             npc.getOrAddTrait(AgentPermanentFlyingTrait.class);
             npc.spawn(player.getLocation());
-            // Despawn on quit clears the live follow target; re-attach so pathing resumes after reconnect.
-            npc.getOrAddTrait(FollowTrait.class).follow(player);
+            AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
         }
     }
 }

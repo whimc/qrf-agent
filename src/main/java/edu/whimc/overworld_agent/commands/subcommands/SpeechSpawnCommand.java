@@ -8,7 +8,6 @@ import edu.whimc.overworld_agent.traits.SpawnExpertTrait;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
 import net.citizensnpcs.api.npc.NPCRegistry;
-import net.citizensnpcs.trait.FollowTrait;
 import net.citizensnpcs.trait.LookClose;
 import net.citizensnpcs.trait.SkinTrait;
 import org.bukkit.command.CommandSender;
@@ -79,7 +78,6 @@ public class SpeechSpawnCommand extends AbstractSubCommand {
 
             //NPC is a player and follows the assigned player and has behaviors specified in SpawnExpertTrait
             NPC npc = registry.createNPC(EntityType.PLAYER, npcName);
-            npc.getOrAddTrait(FollowTrait.class).follow(player);
             npc.getOrAddTrait(LookClose.class).setDisableWhileNavigating(true);
             AgentFollowTuning.applyForPlannedType(plugin, npc, EntityType.PLAYER);
             SpawnExpertTrait trait = new SpawnExpertTrait();
@@ -95,6 +93,7 @@ public class SpeechSpawnCommand extends AbstractSubCommand {
             skinTrait.setSkinPersistent(skinName, signature, data);
             plugin.getQueryer().storeNewAgent(player, COMMAND, npcName, skinName, id -> {
                 npc.spawn(player.getLocation());
+                AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
                 plugin.getAgents().put(player.getName(), npc);
             });
             return true;

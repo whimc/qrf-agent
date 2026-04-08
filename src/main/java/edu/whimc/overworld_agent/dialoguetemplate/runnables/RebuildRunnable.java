@@ -1,6 +1,7 @@
 package edu.whimc.overworld_agent.dialoguetemplate.runnables;
 
 import edu.whimc.overworld_agent.OverworldAgent;
+import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import net.citizensnpcs.api.npc.NPC;
 import net.citizensnpcs.api.trait.trait.Equipment;
 import net.citizensnpcs.trait.FollowTrait;
@@ -75,13 +76,13 @@ public class RebuildRunnable implements Runnable{
                         plugin.getServer().getScheduler().runTaskLaterAsynchronously(plugin, new RebuildRunnable(plugin, sender, buildName, npc, startingLocation, lookup, step, endTime, embodied), time);
                     } else {
                         if((embodied) && (!npc.getOrAddTrait(FollowTrait.class).isActive())) {
-                            npc.getOrAddTrait(FollowTrait.class).follow(sender);
+                            AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, sender);
                         }
                         sender.sendMessage("The " + buildName + " template has been completed");
                     }
                 }  else {
                     if((embodied) && (!npc.getOrAddTrait(FollowTrait.class).isActive())) {
-                        npc.getOrAddTrait(FollowTrait.class).follow(sender);
+                        AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, sender);
                     }
                     sender.sendMessage("The " + buildName + " template has been completed");
                 }

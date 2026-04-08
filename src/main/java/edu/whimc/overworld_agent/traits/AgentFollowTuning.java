@@ -8,15 +8,36 @@ import org.bukkit.entity.EntityType;
 /**
  * Per–entity-type follow distances: player-shaped agents path and walk like normal NPCs;
  * mob agents stay close while hovering with {@link AgentPermanentFlyingTrait}.
+ *
+ * @see <a href="https://jd.citizensnpcs.co/net/citizensnpcs/api/ai/NavigatorParameters.html">NavigatorParameters</a>
  */
 public final class AgentFollowTuning {
 
     private static final String CFG_PLAYER_RANGE = "agent-player-follow-path-range";
     private static final String CFG_PLAYER_MARGIN = "agent-player-follow-margin";
+    private static final String CFG_PLAYER_DEST_TELEPORT = "agent-player-nav-destination-teleport-margin";
+    private static final String CFG_PLAYER_STATIONARY_TICKS = "agent-player-nav-stationary-ticks";
     private static final String CFG_MOB_RANGE = "agent-mob-follow-path-range";
     private static final String CFG_MOB_MARGIN = "agent-mob-follow-margin";
 
     private AgentFollowTuning() {}
+
+    /**
+     * Re-attach follow and navigator tuning on the next tick after {@link NPC#spawn(org.bukkit.Location)}.
+     * Citizens often needs this so {@link FollowTrait} and pathfinding see a fully spawned entity (see Citizens2 #2353).
+     */
+    public static void scheduleFollowAndApplyTraits(OverworldAgent plugin, NPC npc, org.bukkit.entity.Player player) {
+        if (plugin == null || npc == null || player == null) {
+            return;
+        }
+        org.bukkit.Bukkit.getScheduler().runTask(plugin, () -> {
+            if (!npc.isSpawned() || !player.isOnline()) {
+                return;
+            }
+            npc.getOrAddTrait(FollowTrait.class).follow(player);
+            npc.getOrAddTrait(AgentPermanentFlyingTrait.class).applyFlyingForCurrentEntity();
+        });
+    }
 
     /**
      * Use when {@link NPC#getEntity()} is not spawned yet (e.g. right after {@link NPC#createNPC}).
@@ -27,10 +48,16 @@ public final class AgentFollowTuning {
         }
         FollowTrait ft = npc.getOrAddTrait(FollowTrait.class);
         if (type == EntityType.PLAYER) {
-            float range = (float) plugin.getConfig().getDouble(CFG_PLAYER_RANGE, 10);
+            float range = (float) plugin.getConfig().getDouble(CFG_PLAYER_RANGE, 48);
             double margin = plugin.getConfig().getDouble(CFG_PLAYER_MARGIN, 2.5);
+            double destTele = plugin.getConfig().getDouble(CFG_PLAYER_DEST_TELEPORT, -1.0);
+            int stationaryTicks = plugin.getConfig().getInt(CFG_PLAYER_STATIONARY_TICKS, 1200);
             npc.getNavigator().getDefaultParameters().range(range);
             npc.getNavigator().getLocalParameters().range(range);
+            npc.getNavigator().getDefaultParameters().destinationTeleportMargin(destTele);
+            npc.getNavigator().getLocalParameters().destinationTeleportMargin(destTele);
+            npc.getNavigator().getDefaultParameters().stationaryTicks(stationaryTicks);
+            npc.getNavigator().getLocalParameters().stationaryTicks(stationaryTicks);
             // After a mob agent, default params may still carry low straight-line thresholds — ground NPCs need pathfinding.
             float straight = Math.max(range, 32.0f);
             npc.getNavigator().getDefaultParameters().straightLineTargetingDistance(straight);

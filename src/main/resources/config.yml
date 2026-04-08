@@ -15,9 +15,14 @@ agent_type: scientist_casual
 agent-non-player-hover-height: 2.0
 # Multiplier applied to Citizens navigator speed for non-player agents (1.0 = default mob follow speed). Higher = faster when hovering/following.
 agent-non-player-navigator-speed-modifier: 1.65
-# Player-shaped agents: ground pathfinding radius and FollowTrait stop distance (blocks) — walking follow like a normal NPC.
-agent-player-follow-path-range: 10
+# Player-shaped agents: max pathfinding range (blocks). Too low (e.g. 10) makes Citizens give up on paths and rely on teleports; 48+ is typical for following players.
+agent-player-follow-path-range: 48
+# Distance from followed player at which FollowTrait considers the NPC "close enough" (blocks).
 agent-player-follow-margin: 2.5
+# When >= 0, Citizens may snap-teleport the NPC within this distance of the final waypoint; -1 disables (prefer walking).
+agent-player-nav-destination-teleport-margin: -1
+# Ticks the NPC can stand still before navigation is cancelled as STUCK; higher avoids premature cancel on slow paths.
+agent-player-nav-stationary-ticks: 1200
 # Mob agents (hovering): tighter path range and margin so they keep up while floating.
 agent-mob-follow-path-range: 5
 agent-mob-follow-margin: 1.25

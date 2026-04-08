@@ -58,7 +58,7 @@ public class RebuilderSpawnCommand extends AbstractSubCommand {
         if(!plugin.getAgents().containsKey(player.getName())) {
             //NPC is a player and follows the assigned player and has behaviors specified in SpawnExpertTrait
             NPC npc = registry.createNPC(EntityType.PLAYER, "Builder");
-            npc.getOrAddTrait(FollowTrait.class).follow(player);
+            npc.getOrAddTrait(FollowTrait.class);
             npc.getOrAddTrait(Equipment.class);
             npc.getOrAddTrait(LookClose.class).setDisableWhileNavigating(true);
             AgentFollowTuning.applyForPlannedType(plugin, npc, EntityType.PLAYER);
@@ -72,7 +72,7 @@ public class RebuilderSpawnCommand extends AbstractSubCommand {
             npc.addTrait(trait);
             plugin.getQueryer().storeNewAgent(player, COMMAND, "Builder", "Builder", id -> {
                 npc.spawn(player.getLocation());
-                npc.getOrAddTrait(FollowTrait.class).follow(player);
+                AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
                 plugin.getAgents().put(player.getName(), npc);
             });
         } else {

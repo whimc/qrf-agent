@@ -2,6 +2,7 @@ package edu.whimc.overworld_agent.commands.subcommands;
 
 import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.commands.AbstractSubCommand;
+import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import net.citizensnpcs.api.npc.NPC;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -39,8 +40,10 @@ public class SpawnAgentsCommand extends AbstractSubCommand {
             for (Map.Entry<String, NPC> entry : npcs.entrySet()) {
                 NPC npc = entry.getValue();
                 String currName = entry.getKey();
-                if (Bukkit.getPlayer(currName) != null) {
-                    npc.spawn(Bukkit.getPlayer(currName).getLocation());
+                Player p = Bukkit.getPlayer(currName);
+                if (p != null) {
+                    npc.spawn(p.getLocation());
+                    AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, p);
                 }
             }
             sender.sendMessage("All agents were reactivated");
@@ -48,7 +51,9 @@ public class SpawnAgentsCommand extends AbstractSubCommand {
             if(Bukkit.getPlayer(playerName) != null){
                 NPC npc = npcs.get(playerName);
                 if(npc != null) {
-                    npc.spawn(Bukkit.getPlayer(playerName).getLocation());
+                    Player p = Bukkit.getPlayer(playerName);
+                    npc.spawn(p.getLocation());
+                    AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, p);
                     sender.sendMessage(npc.getName() + " was spawned");
                 } else {
                     sender.sendMessage("Player does not have an agent");
