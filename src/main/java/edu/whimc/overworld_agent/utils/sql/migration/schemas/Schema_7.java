@@ -34,7 +34,7 @@ public class Schema_7 extends SchemaVersion {
      * Constructor to specify which migrations to do
      */
     public Schema_7() {
-        super(7, null);
+        super(7, new Schema_8());
     }
     @Override
     protected void migrateRoutine(Connection connection) throws SQLException {

@@ -5,6 +5,8 @@ import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.dialoguetemplate.Interaction;
 import edu.whimc.overworld_agent.dialoguetemplate.Tag;
 import edu.whimc.overworld_agent.dialoguetemplate.models.BuildTemplate;
+import edu.whimc.overworld_agent.llm.context.AgentChatContextItem;
+import edu.whimc.overworld_agent.llm.context.AgentChatEvent;
 import net.citizensnpcs.api.npc.NPC;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -91,6 +93,46 @@ public class Queryer {
             "UPDATE whimc_tags " +
                     "SET active=0 " +
                     "WHERE rowid=? AND active=1";
+
+    /**
+     * Query for saving an agent chat conversation.
+     */
+    private static final String QUERY_SAVE_AGENT_CHAT_CONVERSATION =
+            "INSERT INTO whimc_agent_chat_conversations " +
+                    "(conversation_id, time, uuid, username, player_research_id, session_id, world_name, agent_type, research_allowed) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+                    "ON DUPLICATE KEY UPDATE " +
+                    "time = VALUES(time), " +
+                    "uuid = VALUES(uuid), " +
+                    "username = VALUES(username), " +
+                    "player_research_id = VALUES(player_research_id), " +
+                    "session_id = VALUES(session_id), " +
+                    "world_name = VALUES(world_name), " +
+                    "agent_type = VALUES(agent_type), " +
+                    "research_allowed = VALUES(research_allowed)";
+
+    /**
+     * Query for saving an agent chat turn.
+     */
+    private static final String QUERY_SAVE_AGENT_CHAT_TURN =
+            "INSERT INTO whimc_agent_chat_turns " +
+                    "(turn_id, conversation_id, turn_index, time, uuid, username, player_research_id, session_id, " +
+                    "world_name, agent_type, agent_name, command, user_message, assistant_response, " +
+                    "llm_provider, llm_model, system_prompt_version, system_prompt_hash, rag_enabled, rag_query, " +
+                    "request_started_at, response_received_at, latency_ms, status, error_message) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+    private static final String QUERY_SAVE_AGENT_CHAT_CONTEXT_ITEM =
+            "INSERT INTO whimc_agent_chat_context_items " +
+                    "(turn_id, time, context_rank, context_type, source_id, source_title, world_name, " +
+                    "x, y, z, distance, trait_type, context_text, context_hash, score) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+    private static final String QUERY_SAVE_AGENT_CHAT_EVENT =
+            "INSERT INTO whimc_agent_chat_events " +
+                    "(turn_id, time, event_type, event_payload) " +
+                    "VALUES (?, ?, ?, ?)";
+
     private final OverworldAgent plugin;
     private final MySQLConnection sqlConnection;
 
@@ -475,6 +517,425 @@ public class Queryer {
                 e.printStackTrace();
             }
         });
+    }
+
+    public void storeAgentChatResearchTurn(
+            String conversationId,
+            String turnId,
+            int turnIndex,
+            long time,
+            String uuid,
+            String username,
+            String playerResearchId,
+            String sessionId,
+            String worldName,
+            String agentType,
+            String agentName,
+            String command,
+            String userMessage,
+            String assistantResponse,
+            String llmProvider,
+            String llmModel,
+            String systemPromptVersion,
+            String systemPromptHash,
+            boolean ragEnabled,
+            String ragQuery,
+            long requestStartedAt,
+            Long responseReceivedAt,
+            Integer latencyMs,
+            String status,
+            String errorMessage
+    ) {
+        async(() -> {
+            try (Connection connection = this.sqlConnection.getConnection()) {
+
+                if (connection == null) {
+                    plugin.getLogger().warning("[OverworldAgent][ResearchDB] Could not store agent chat turn: MySQL connection is null.");
+                    return;
+                }
+
+                connection.setAutoCommit(false);
+
+                try {
+                    try (PreparedStatement conversationStatement =
+                                 connection.prepareStatement(QUERY_SAVE_AGENT_CHAT_CONVERSATION)) {
+
+                        conversationStatement.setString(1, conversationId);
+                        conversationStatement.setLong(2, time);
+                        conversationStatement.setString(3, uuid);
+                        conversationStatement.setString(4, username);
+                        conversationStatement.setString(5, playerResearchId);
+                        conversationStatement.setString(6, sessionId);
+                        conversationStatement.setString(7, worldName);
+                        conversationStatement.setString(8, agentType);
+                        conversationStatement.setBoolean(9, true);
+
+                        conversationStatement.executeUpdate();
+                    }
+
+                    try (PreparedStatement turnStatement =
+                                 connection.prepareStatement(QUERY_SAVE_AGENT_CHAT_TURN, Statement.RETURN_GENERATED_KEYS)) {
+
+                        turnStatement.setString(1, turnId);
+                        turnStatement.setString(2, conversationId);
+                        turnStatement.setInt(3, turnIndex);
+                        turnStatement.setLong(4, time);
+                        turnStatement.setString(5, uuid);
+                        turnStatement.setString(6, username);
+                        turnStatement.setString(7, playerResearchId);
+                        turnStatement.setString(8, sessionId);
+                        turnStatement.setString(9, worldName);
+                        turnStatement.setString(10, agentType);
+                        turnStatement.setString(11, agentName);
+                        turnStatement.setString(12, command);
+                        turnStatement.setString(13, userMessage);
+                        turnStatement.setString(14, assistantResponse);
+                        turnStatement.setString(15, llmProvider);
+                        turnStatement.setString(16, llmModel);
+                        turnStatement.setString(17, systemPromptVersion);
+                        turnStatement.setString(18, systemPromptHash);
+                        turnStatement.setBoolean(19, ragEnabled);
+                        turnStatement.setString(20, ragQuery);
+                        turnStatement.setLong(21, requestStartedAt);
+
+                        if (responseReceivedAt == null) {
+                            turnStatement.setNull(22, Types.BIGINT);
+                        } else {
+                            turnStatement.setLong(22, responseReceivedAt);
+                        }
+
+                        if (latencyMs == null) {
+                            turnStatement.setNull(23, Types.INTEGER);
+                        } else {
+                            turnStatement.setInt(23, latencyMs);
+                        }
+
+                        turnStatement.setString(24, status);
+                        turnStatement.setString(25, errorMessage);
+
+                        turnStatement.executeUpdate();
+                    }
+
+                    connection.commit();
+
+                    plugin.getLogger().info(
+                            "[OverworldAgent][ResearchDB] Stored agent chat research turn. " +
+                                    "conversationId=" + conversationId +
+                                    ", turnId=" + turnId +
+                                    ", status=" + status
+                    );
+
+                } catch (SQLException e) {
+                    connection.rollback();
+                    throw e;
+
+                } finally {
+                    connection.setAutoCommit(true);
+                }
+
+            } catch (SQLException e) {
+                plugin.getLogger().warning(
+                        "[OverworldAgent][ResearchDB] Failed to store agent chat research turn: " +
+                                e.getClass().getSimpleName() + ": " + e.getMessage()
+                );
+                e.printStackTrace();
+            }
+        });
+    }
+
+    public void storeAgentChatResearchTurnWithContextItems(
+            String conversationId,
+            String turnId,
+            int turnIndex,
+            long time,
+            String uuid,
+            String username,
+            String playerResearchId,
+            String sessionId,
+            String worldName,
+            String agentType,
+            String agentName,
+            String command,
+            String userMessage,
+            String assistantResponse,
+            String llmProvider,
+            String llmModel,
+            String systemPromptVersion,
+            String systemPromptHash,
+            boolean ragEnabled,
+            String ragQuery,
+            long requestStartedAt,
+            Long responseReceivedAt,
+            Integer latencyMs,
+            String status,
+            String errorMessage,
+            List<AgentChatContextItem> contextItems,
+            List<AgentChatEvent> events
+    ) {
+        async(() -> {
+            try (Connection connection = this.sqlConnection.getConnection()) {
+                if (connection == null) {
+                    plugin.getLogger().warning("[OverworldAgent][ResearchDB] Could not store chat turn/context: MySQL connection is null.");
+                    return;
+                }
+
+                connection.setAutoCommit(false);
+
+                try {
+                    saveAgentChatConversation(
+                            connection,
+                            conversationId,
+                            time,
+                            uuid,
+                            username,
+                            playerResearchId,
+                            sessionId,
+                            worldName,
+                            agentType
+                    );
+
+                    saveAgentChatTurn(
+                            connection,
+                            conversationId,
+                            turnId,
+                            turnIndex,
+                            time,
+                            uuid,
+                            username,
+                            playerResearchId,
+                            sessionId,
+                            worldName,
+                            agentType,
+                            agentName,
+                            command,
+                            userMessage,
+                            assistantResponse,
+                            llmProvider,
+                            llmModel,
+                            systemPromptVersion,
+                            systemPromptHash,
+                            ragEnabled,
+                            ragQuery,
+                            requestStartedAt,
+                            responseReceivedAt,
+                            latencyMs,
+                            status,
+                            errorMessage
+                    );
+
+                    if (contextItems != null && !contextItems.isEmpty()) {
+                        saveAgentChatContextItems(connection, contextItems);
+                    }
+
+                    if (events != null && !events.isEmpty()) {
+                        saveAgentChatEvents(connection, events);
+                    }
+                    connection.commit();
+
+                    plugin.getLogger().info(
+                            "[OverworldAgent][ResearchDB] Stored chat turn with context. " +
+                                    "conversationId=" + conversationId +
+                                    ", turnId=" + turnId +
+                                    ", status=" + status +
+                                    ", contextItems=" + (contextItems == null ? 0 : contextItems.size())
+                    );
+
+                } catch (SQLException e) {
+                    connection.rollback();
+                    throw e;
+
+                } finally {
+                    connection.setAutoCommit(true);
+                }
+
+            } catch (SQLException e) {
+                plugin.getLogger().warning(
+                        "[OverworldAgent][ResearchDB] Failed to store chat turn/context: " +
+                                e.getClass().getSimpleName() + ": " + e.getMessage()
+                );
+                e.printStackTrace();
+            }
+        });
+    }
+
+    private void saveAgentChatConversation(
+            Connection connection,
+            String conversationId,
+            long time,
+            String uuid,
+            String username,
+            String playerResearchId,
+            String sessionId,
+            String worldName,
+            String agentType
+    ) throws SQLException {
+        try (PreparedStatement statement =
+                     connection.prepareStatement(QUERY_SAVE_AGENT_CHAT_CONVERSATION)) {
+
+            statement.setString(1, conversationId);
+            statement.setLong(2, time);
+            statement.setString(3, uuid);
+            statement.setString(4, username);
+            statement.setString(5, playerResearchId);
+            statement.setString(6, sessionId);
+            statement.setString(7, worldName);
+            statement.setString(8, agentType);
+            statement.setBoolean(9, true);
+
+            statement.executeUpdate();
+        }
+    }
+
+    private void saveAgentChatTurn(
+            Connection connection,
+            String conversationId,
+            String turnId,
+            int turnIndex,
+            long time,
+            String uuid,
+            String username,
+            String playerResearchId,
+            String sessionId,
+            String worldName,
+            String agentType,
+            String agentName,
+            String command,
+            String userMessage,
+            String assistantResponse,
+            String llmProvider,
+            String llmModel,
+            String systemPromptVersion,
+            String systemPromptHash,
+            boolean ragEnabled,
+            String ragQuery,
+            long requestStartedAt,
+            Long responseReceivedAt,
+            Integer latencyMs,
+            String status,
+            String errorMessage
+    ) throws SQLException {
+        try (PreparedStatement statement =
+                     connection.prepareStatement(QUERY_SAVE_AGENT_CHAT_TURN)) {
+
+            statement.setString(1, turnId);
+            statement.setString(2, conversationId);
+            statement.setInt(3, turnIndex);
+            statement.setLong(4, time);
+            statement.setString(5, uuid);
+            statement.setString(6, username);
+            statement.setString(7, playerResearchId);
+            statement.setString(8, sessionId);
+            statement.setString(9, worldName);
+            statement.setString(10, agentType);
+            statement.setString(11, agentName);
+            statement.setString(12, command);
+            statement.setString(13, userMessage);
+            statement.setString(14, assistantResponse);
+            statement.setString(15, llmProvider);
+            statement.setString(16, llmModel);
+            statement.setString(17, systemPromptVersion);
+            statement.setString(18, systemPromptHash);
+            statement.setBoolean(19, ragEnabled);
+            statement.setString(20, ragQuery);
+            statement.setLong(21, requestStartedAt);
+
+            if (responseReceivedAt == null) {
+                statement.setNull(22, Types.BIGINT);
+            } else {
+                statement.setLong(22, responseReceivedAt);
+            }
+
+            if (latencyMs == null) {
+                statement.setNull(23, Types.INTEGER);
+            } else {
+                statement.setInt(23, latencyMs);
+            }
+
+            statement.setString(24, status);
+            statement.setString(25, errorMessage);
+
+            statement.executeUpdate();
+        }
+    }
+
+    private void saveAgentChatContextItems(
+            Connection connection,
+            List<AgentChatContextItem> items
+    ) throws SQLException {
+        try (PreparedStatement statement =
+                     connection.prepareStatement(QUERY_SAVE_AGENT_CHAT_CONTEXT_ITEM)) {
+
+            for (AgentChatContextItem item : items) {
+                statement.setString(1, item.turnId());
+                statement.setLong(2, item.time());
+                statement.setInt(3, item.contextRank());
+                statement.setString(4, item.contextType());
+                statement.setString(5, item.sourceId());
+                statement.setString(6, item.sourceTitle());
+                statement.setString(7, item.worldName());
+
+                if (item.x() == null) {
+                    statement.setNull(8, Types.DOUBLE);
+                } else {
+                    statement.setDouble(8, item.x());
+                }
+
+                if (item.y() == null) {
+                    statement.setNull(9, Types.DOUBLE);
+                } else {
+                    statement.setDouble(9, item.y());
+                }
+
+                if (item.z() == null) {
+                    statement.setNull(10, Types.DOUBLE);
+                } else {
+                    statement.setDouble(10, item.z());
+                }
+
+                if (item.distance() == null) {
+                    statement.setNull(11, Types.DOUBLE);
+                } else {
+                    statement.setDouble(11, item.distance());
+                }
+
+                statement.setString(12, item.traitType());
+                statement.setString(13, item.contextText());
+                statement.setString(14, item.contextHash());
+
+                if (item.score() == null) {
+                    statement.setNull(15, Types.DOUBLE);
+                } else {
+                    statement.setDouble(15, item.score());
+                }
+
+                statement.addBatch();
+            }
+
+            statement.executeBatch();
+        }
+    }
+
+    private void saveAgentChatEvents(
+            Connection connection,
+            List<AgentChatEvent> events
+    ) throws SQLException {
+        if (events == null || events.isEmpty()) {
+            return;
+        }
+
+        try (PreparedStatement statement =
+                     connection.prepareStatement(QUERY_SAVE_AGENT_CHAT_EVENT)) {
+
+            for (AgentChatEvent event : events) {
+                statement.setString(1, event.turnId());
+                statement.setLong(2, event.time());
+                statement.setString(3, event.eventType());
+                statement.setString(4, event.eventPayload());
+                statement.addBatch();
+            }
+
+            statement.executeBatch();
+        }
     }
 
     private <T> void sync(Consumer<T> cons, T val) {

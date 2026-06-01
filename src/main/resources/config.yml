@@ -49,6 +49,10 @@ llm:
     include-extensions:
       - txt
       - md
+  npc-context:
+    enabled: true
+    radius: 25.0
+    max-items: 3
 tags:
   num_tags:
     NoMoon: 25

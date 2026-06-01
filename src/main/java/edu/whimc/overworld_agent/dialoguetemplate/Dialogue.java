@@ -526,6 +526,7 @@ public class Dialogue implements Listener {
     public void doDialogue() {
         plugin.relinkOwnedAgent(player);
         plugin.ensureAgentEdits(player);
+        plugin.getLogger().fine("[OverworldAgent][Journey] doDialogue started");
         this.spigotCallback.clearCallbacks(player);
         FileConfiguration cfg = plugin.getConfig();
         Utils.msgNoPrefix(player, "&lWhat do you want to discuss?", "");
@@ -853,7 +854,7 @@ public class Dialogue implements Listener {
 
     private void doResponse() {
         DialoguePrompt prompt = null;
-
+        plugin.getLogger().fine("[OverworldAgent][Journey] doResponse started");
             Chatbot chatbot = new Chatbot(response);
             double[] prediction = chatbot.classifyDialogueIntent();
             int predictedClass = (int) prediction[0];
@@ -930,6 +931,7 @@ public class Dialogue implements Listener {
         if (plugin.getConfig().getBoolean("llm.use-for-reply", false)
                 && plugin.getLlmProvider() != null
                 && plugin.getLlmProvider().isConfigured()) {
+            plugin.getLogger().fine("[OverworldAgent][Journey] LLM path started");
             String systemPrompt = plugin.augmentLlmSystemPrompt(plugin.getConfig().getString("llm.system-prompt",
                     "You are a friendly in-game science education assistant. "
                             + "Answer clearly and briefly; keep content appropriate for students."));
