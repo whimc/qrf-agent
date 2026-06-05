@@ -1,3 +1,5 @@
+# Publishes a downloadable JAR to GitHub Releases only.
+# Minecraft server install is manual — no deploy steps or secrets.
 name: Release
 
 on:
@@ -65,5 +67,7 @@ jobs:
           commit-message: chore(release): bump version to ${{ steps.version.outputs.new }}
           body: |
             Automated `pom.xml` version bump after publishing [v${{ steps.version.outputs.new }}](https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.new }}).
+
+            Download the JAR from the GitHub Release and install it on the Minecraft server manually.
           labels: release
           add-paths: pom.xml

@@ -19,8 +19,8 @@ jobs:
           java-version: "21"
           cache: maven
 
-      - name: Resolve Maven dependencies
-        run: mvn -B -ntp dependency:go-offline
+      - name: Verify dependency resolution
+        run: mvn -B -ntp dependency:tree -Dverbose=false
 
-      - name: Analyze dependency tree
+      - name: Check for undeclared or unused dependencies
         run: mvn -B -ntp dependency:analyze-only -DignoreNonCompile=true
