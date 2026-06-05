@@ -1,6 +1,6 @@
-# Overworld-Agent
+# QRF-Agent
 
-Overworld-Agent is a Minecraft plugin to create and define agent behavior. To teleport to the agent room for the guide agent for exploration use `/destination teleport AIchoice`. 
+QRF-Agent is a Minecraft plugin to create and define agent behavior (forked from [Overworld-Agent](https://github.com/whimc/Overworld-Agent) `animal-ai`). To teleport to the agent room for the guide agent for exploration use `/destination teleport AIchoice`. 
 To select the agent right click on the desired agent and to start a conversation with your agent also right click on them. 
 To select a dialogue option must click enter then left click on the desired option.
 
@@ -9,7 +9,7 @@ Alternatively you can spawn a guide agent with **`/agents spawn`** or **`/agent 
 **Spawn syntax**
 
 - **Player agent:** `/agents spawn player <skin> <name…>` — first tab-completion token is `player`, second is a skin key from `skins.<agent_type>` in `config.yml`, then the display name (spaces allowed in the name).
-- **Animal agent:** `/agents spawn <animal> <name…>` — `<animal>` is one of the **fixed** mob IDs allowed by `AgentEntityTypes` (see that class / tab-complete: e.g. `axolotl`, `ocelot`, `turtle`, `sheep`, `strider`, `sniffer`, `nautilus`, `happy_ghast`, `bee`, `parrot`; types not present on your game version are omitted at runtime). No skin argument.
+- **Animal agent:** `/agents spawn <animal> <name…>` — `<animal>` is one of the **fixed** mob IDs allowed by `AgentEntityTypes` (see that class / tab-complete: e.g. `axolotl`, `ocelot`, `turtle`, `sheep`, `pig`, `strider`, `sniffer`, `nautilus`, `happy_ghast`, `bee`, `parrot`; types not present on your game version are omitted at runtime). No skin argument.
 - **Legacy:** `/agents spawn <skin> <name…>` — if the first token is not a valid entity type, it is treated as a **player** skin key (same as omitting `player`).
 
 Tab-complete the first argument to see every allowed value on your server version.
@@ -29,8 +29,8 @@ $ mvn install
 ---
 
 ## Configuration
-The base config file can be found under `/Overworld-Agent/src/main/resources/config.yml`.
-An example config file can be found under `/Overworld-Agent/example-config.yml`.
+The base config file can be found under [`src/main/resources/config.yml`](src/main/resources/config.yml).
+An example config file can be found under [`example-config.yml`](example-config.yml).
 
 ### Skins
 | Key | Type | Description |
@@ -105,6 +105,26 @@ RAG (retrieval-augmented generation) here means: **optional** inclusion of plain
 
 Put glossaries, world lore, or lesson snippets as `.md`/`.txt` files there. This is **not** a vector database or hybrid search—only a simple file concat for small corpora; you can replace the flow later with a custom `LlmProvider` that does real retrieval.
 
+#### Nearby NPC context (`llm.npc-context`)
+
+Used by **interactive LLM chat** (`/agent chat test`) to ground replies in Citizens NPCs near the player. The plugin scans spawned NPCs in the same world, ranks by distance, and appends a short summary to the system prompt (name, trait type, assigned player, coordinates).
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `llm.npc-context.enabled` | `true` | Include nearby NPC summaries in interactive chat turns. |
+| `llm.npc-context.radius` | `25.0` | Search radius in blocks around the player. |
+| `llm.npc-context.max-items` | `3` | Maximum NPCs to include per turn. |
+
+Example:
+
+```yaml
+llm:
+  npc-context:
+    enabled: true
+    radius: 25.0
+    max-items: 3
+```
+
 #### Example configs
 
 **OpenAI (env key):**
@@ -165,6 +185,59 @@ Use `depend` / `softdepend` / load order so your code runs after `WHIMC-Overworl
 | `true` | no / `isConfigured()` false | Template feedback (no HTTP call). |
 | `true` | yes | Async `complete(...)`; on success the **shown** reply is the LLM output; failures are logged and template feedback is kept. |
 
+### Interactive LLM chat (`/agent chat test`)
+
+Separate from embodied right-click dialogue and from `llm.use-for-reply` on the **Discuss something** flow. This mode starts a **multi-turn chat session** that listens to the player’s **public chat** (`T`), calls the configured `LlmProvider`, and logs research data to MySQL.
+
+| Command | Permission | Description |
+|---------|------------|-------------|
+| `/agent chat test` | `whimc-agent.agent.chat` | Start interactive LLM chat (requires a configured provider; independent of `llm.use-for-reply`). |
+| `/agent chat end` | `whimc-agent.agent.chat` | End the session. |
+| `/agent chat` | `whimc-agent.agent.chat` | Opens the classic **disembodied** Guide/Builder menu (PMML + optional `use-for-reply`). |
+
+**In-session behavior**
+
+1. Player runs `/agent chat test`.
+2. Each chat line is intercepted (public chat is cancelled; the player sees a private `You: …` echo).
+3. The plugin builds a system prompt from `llm.system-prompt`, optional **RAG** (`llm.rag`), and optional **nearby NPC context** (`llm.npc-context`).
+4. Up to **10** prior user/assistant lines in the session are prepended to the user message for short-term memory.
+5. The LLM runs **async**; the player sees `Thinking…` then the assistant reply.
+6. Type **`exit`**, **`quit`**, **`stop`**, or run `/agent chat end` to leave the mode.
+
+**Requirements:** MySQL configured and reachable (schema migration **8** creates chat research tables). Provider must be configured (`llm.provider` + key/model or `base-url` for local).
+
+**Research logging (MySQL)**
+
+Each turn is stored for analysis (conversation id, turn index, provider/model, latency, status, errors). Related tables:
+
+| Table | Purpose |
+|-------|---------|
+| `whimc_agent_chat_conversations` | One row per interactive session. |
+| `whimc_agent_chat_turns` | User message, assistant response, provider metadata, timing. |
+| `whimc_agent_chat_context_items` | Nearby NPC context rows attached to a turn. |
+| `whimc_agent_chat_events` | Stage/trace events (LLM call, RAG, failures). |
+| `whimc_agent_chat_retrieved_chunks` | Reserved for RAG chunk metadata when populated. |
+
+Console logs are prefixed with `[OverworldAgent][LLM chat]` for debugging.
+
+**Minimal interactive setup**
+
+```yaml
+llm:
+  provider: openai
+  api-key-env: OPENAI_API_KEY
+  model: gpt-4o-mini
+  system-prompt: "You are a friendly in-game science tutor."
+  rag:
+    enabled: false
+  npc-context:
+    enabled: true
+    radius: 25.0
+    max-items: 3
+```
+
+Then in-game: `/agent chat test` → type messages in chat → `/agent chat end` when finished.
+
 ---
 ## Commands
 
@@ -196,7 +269,7 @@ Permissions follow **`whimc-agent.<base>.<subcommand>`** (each `/agents …` sub
 
 | Subcommand | Permission node | Description |
 |------------|-----------------|-------------|
-| **`chat`** | `whimc-agent.agent.chat` | Open the disembodied menu (`Guide` or `Builder` per `chat_type`). |
+| **`chat`** | `whimc-agent.agent.chat` | Disembodied menu (`Guide`/`Builder`), or **`chat test`** / **`chat end`** for interactive LLM chat (see above). |
 | **`spawn`** | `whimc-agent.agents.spawn` | Same as **`/agents spawn`** (uses the shared `ExpertSpawnCommand`). |
 
 ### Guide agent entity types (reference)
