@@ -24,6 +24,7 @@ public final class AgentEntityTypes {
             "OCELOT",
             "TURTLE",
             "SHEEP",
+            "PIG",
             "STRIDER",
             "SNIFFER",
             "NAUTILUS",
