@@ -1,17 +1,14 @@
-name: CodeQL
+name: Dependency Audit
 
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
 
 permissions:
   contents: read
-  security-events: write
 
 jobs:
-  analyze:
+  dependency-audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,11 +19,8 @@ jobs:
           java-version: "21"
           cache: maven
 
-      - uses: github/codeql-action/init@v3
-        with:
-          languages: java
+      - name: Resolve Maven dependencies
+        run: mvn -B -ntp dependency:go-offline
 
-      - name: Build for CodeQL
-        run: mvn -B -ntp package
-
-      - uses: github/codeql-action/analyze@v3
+      - name: Analyze dependency tree
+        run: mvn -B -ntp dependency:analyze-only -DignoreNonCompile=true

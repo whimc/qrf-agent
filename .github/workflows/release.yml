@@ -10,6 +10,7 @@ concurrency:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   release:
@@ -41,7 +42,7 @@ jobs:
       - name: Build release JAR
         run: mvn -B -ntp package
 
-      - name: Commit version bump, tag, and publish release
+      - name: Publish GitHub Release
         env:
           NEW_VERSION: ${{ steps.version.outputs.new }}
           GH_TOKEN: ${{ github.token }}
@@ -49,16 +50,20 @@ jobs:
           JAR="target/WHIMC-OverworldAgent-${NEW_VERSION}.jar"
           test -f "${JAR}"
 
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pom.xml
-          git commit -m "chore(release): bump version to ${NEW_VERSION}"
-          git tag "v${NEW_VERSION}"
-
-          git push origin main
-          git push origin "v${NEW_VERSION}"
-
           gh release create "v${NEW_VERSION}" \
             "${JAR}" \
             --title "v${NEW_VERSION}" \
+            --target "${GITHUB_SHA}" \
             --generate-notes
+
+      - name: Open version bump pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: release/bump-${{ steps.version.outputs.new }}
+          delete-branch: true
+          title: chore(release): bump version to ${{ steps.version.outputs.new }}
+          commit-message: chore(release): bump version to ${{ steps.version.outputs.new }}
+          body: |
+            Automated `pom.xml` version bump after publishing [v${{ steps.version.outputs.new }}](https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.new }}).
+          labels: release
+          add-paths: pom.xml
