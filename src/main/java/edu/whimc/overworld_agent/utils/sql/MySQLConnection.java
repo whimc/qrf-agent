@@ -13,7 +13,8 @@ import java.util.logging.Level;
 
 public class MySQLConnection {
 
-    public static final String URL_TEMPLATE = "jdbc:mysql://%s:%s/%s";
+    public static final String URL_TEMPLATE =
+            "jdbc:mysql://%s:%s/%s?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_unicode_ci";
 
     private Connection connection;
     private final String host;
@@ -65,7 +66,9 @@ public class MySQLConnection {
             plugin.getLogger().info(
                     "Adding missing column whimc_dialog_science.agent_response (database out of sync with local schema version).");
             try (Statement st = this.connection.createStatement()) {
-                st.executeUpdate("ALTER TABLE whimc_dialog_science ADD COLUMN agent_response TEXT");
+                st.executeUpdate(
+                        "ALTER TABLE whimc_dialog_science ADD COLUMN agent_response TEXT "
+                                + "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
             }
         } catch (SQLException e) {
             plugin.getLogger().log(Level.WARNING,
@@ -95,6 +98,9 @@ public class MySQLConnection {
                 return this.connection;
             }
             this.connection = DriverManager.getConnection(this.url, this.username, this.password);
+            try (Statement statement = this.connection.createStatement()) {
+                statement.execute("SET NAMES utf8mb4");
+            }
         } catch (SQLException ignored) {
             return null;
         }

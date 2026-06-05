@@ -123,7 +123,7 @@ public class Schema_8 extends SchemaVersion {
                     ");";
 
     public Schema_8() {
-        super(8, null);
+        super(8, new Schema_9());
     }
 
     @Override
