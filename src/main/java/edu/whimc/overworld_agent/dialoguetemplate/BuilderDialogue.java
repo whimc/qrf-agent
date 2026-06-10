@@ -34,6 +34,8 @@ public class BuilderDialogue {
     private boolean embodied;
     private int id;
     private Logger log;
+    /** Reopens the parent menu (main agent dialogue) when the player clicks "Go back". */
+    private Runnable goBack;
     public BuilderDialogue(OverworldAgent plugin, Player player, boolean embodied){
         this.plugin = plugin;
         this.player = player;
@@ -44,7 +46,12 @@ public class BuilderDialogue {
         id = -1;
     }
 
+    public void setGoBack(Runnable goBack) {
+        this.goBack = goBack;
+    }
+
     public void doDialogue(){
+        this.spigotCallback.clearCallbacks(player);
         HashMap<Player,List<BuildTemplate>> templates = plugin.getBuildTemplates();
         Utils.msgNoPrefix(player, "&lWhat do you want to do?", "");
         if(player.isOp()){
@@ -226,6 +233,11 @@ public class BuilderDialogue {
                                             });
                                         });
                             }
+                            sendComponent(
+                                    player,
+                                    "&8" + BULLET + " &7&nGo back",
+                                    "&aClick here to go back",
+                                    l -> doDialogue());
                         });
                 /**
                 sendComponent(
@@ -290,6 +302,20 @@ public class BuilderDialogue {
                         });
             }
         }
+
+        sendComponent(
+                player,
+                "&8" + BULLET + " &7&nGo back",
+                "&aClick here to go back",
+                p -> {
+                    this.spigotCallback.clearCallbacks(player);
+                    if (goBack != null) {
+                        goBack.run();
+                    } else {
+                        // Opened directly (builder NPC right click): go back to the main agent menu.
+                        new Dialogue(plugin, player, true, embodied).doDialogue();
+                    }
+                });
     }
 
     public Player getPlayer(){return player;}

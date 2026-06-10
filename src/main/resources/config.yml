@@ -9,7 +9,17 @@ journey:
   journey-command-root: journey
   # When true, logs Journey domain / public waypoint counts when opening the guidance menu (console).
   debug-log: false
-expiration-days: 7
+  # Optional override for portal-linked world clusters (e.g. Colder). When unset, auto-detects from CamelCase names.
+  linked-world-prefix: ""
+  # Minimum number of worlds sharing a prefix before treating them as linked (auto-detect only).
+  linked-world-min-siblings: 2
+  # Include WorldGuard / DB regions whose id starts with poi- (also used as Journey name_id when registered).
+  include-poi-regions: true
+  poi-region-prefix: "poi-"
+  # worldguard = in-memory regions; database = rg_region SQL; both = merge (recommended).
+  poi-source: both
+  # Table prefix for WorldGuard MySQL storage (rg_region, rg_world).
+  worldguard-table-prefix: rg_
 agent_type: scientist_casual
 # Blocks above ground for non-player agent mobs (no gravity + height lock). Player-shaped agents ignore this. Use 0 to disable vertical tracking (only no-gravity).
 agent-non-player-hover-height: 2.0
@@ -23,6 +33,10 @@ agent-player-follow-margin: 2.5
 agent-player-nav-destination-teleport-margin: -1
 # Ticks the NPC can stand still before navigation is cancelled as STUCK; higher avoids premature cancel on slow paths.
 agent-player-nav-stationary-ticks: 1200
+# When horizontal distance to the owner exceeds this, the agent catch-up teleports beside them (not on top).
+agent-follow-catch-up-distance: 16.0
+# Blocks to the side of the player when catch-up teleporting.
+agent-follow-catch-up-offset: 1.5
 # Mob agents (hovering): tighter path range and margin so they keep up while floating.
 agent-mob-follow-path-range: 5
 agent-mob-follow-margin: 1.25
@@ -53,17 +67,6 @@ llm:
     enabled: true
     radius: 25.0
     max-items: 3
-tags:
-  num_tags:
-    NoMoon: 25
-  feedback:
-    holo_visible: false
-    enabled: true
-    default: "Great observation! I'll take note of your discovery. Please continue thinking about the science concepts unique to this world. Feel free to show me something else or ask me about anything!"
-  NoMoon:
-    - tag:
-      aliases: tree
-      feedback: "The trees look kinda funny don't they? This is a really neat effect of the extreme wind as a result of having no moon. Why do you think they look this way?"
 prompts:
   - label: 0
     prompt: agent
@@ -193,9 +196,8 @@ template-gui:
     custom-response-sign-header: "&f&nYour response"
     end-your-own-response-speech: "&f&nClick here to stop query"
     guidance-response: "&f&nCan you show me something cool?"
-    show-response: "&f&nI want to show you something unique to this environment!"
     score-response: "&f&nI want to see my scores"
-    tag-score-response: "&f&nI want to see my tag scores"
+    build-response: "&f&nI want to build something!"
     agent-edit: "&f&nI want to edit my agent"
   filler-item: white_stained_glass_pane
   inventory-name: "&lTopics"

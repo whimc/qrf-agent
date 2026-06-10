@@ -4,6 +4,7 @@ import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.commands.AbstractSubCommand;
 import edu.whimc.overworld_agent.utils.AgentEntityTypes;
 import edu.whimc.overworld_agent.traits.AgentFollowTuning;
+import edu.whimc.overworld_agent.traits.AgentFollowCatchUpTrait;
 import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import edu.whimc.overworld_agent.traits.SpawnExpertTrait;
 import net.citizensnpcs.api.CitizensAPI;
@@ -132,6 +133,7 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
             trait.setInputType(true);
             npc.addTrait(trait);
             npc.addTrait(new AgentPermanentFlyingTrait());
+            npc.addTrait(new AgentFollowCatchUpTrait());
 
             if (entityType == EntityType.PLAYER) {
                 //Set NPC skin by grabbing values from config

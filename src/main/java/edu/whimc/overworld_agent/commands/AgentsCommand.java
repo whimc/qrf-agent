@@ -25,7 +25,6 @@ public class AgentsCommand implements CommandExecutor, TabCompleter {
         subCommands.put("rebuilderspawn", new RebuilderSpawnCommand(plugin, "agents", "rebuilderspawn"));
         subCommands.put("reactivate", new SpawnAgentsCommand(plugin, "agents", "reactivate"));
         subCommands.put("skin_type", new SkinTypeCommand(plugin, "agents", "skin_type"));
-        subCommands.put("chat_type", new ChangeAgentTypeCommand(plugin, "agents", "chat_type"));
         subCommands.put("about", new AboutAgentsCommand(plugin, "agents", "about"));
     }
 

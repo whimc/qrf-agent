@@ -50,7 +50,7 @@ jobs:
           NEW_VERSION: ${{ steps.version.outputs.new }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          JAR="target/WHIMC-OverworldAgent-${NEW_VERSION}.jar"
+          JAR="target/WHIMC-QRF-Agent-${NEW_VERSION}.jar"
           test -f "${JAR}"
 
           gh release create "v${NEW_VERSION}" \
