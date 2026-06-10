@@ -64,8 +64,8 @@ jobs:
         with:
           branch: release/bump-${{ steps.version.outputs.new }}
           delete-branch: true
-          title: chore(release): bump version to ${{ steps.version.outputs.new }}
-          commit-message: chore(release): bump version to ${{ steps.version.outputs.new }}
+          title: "chore(release): bump version to ${{ steps.version.outputs.new }}"
+          commit-message: "chore(release): bump version to ${{ steps.version.outputs.new }}"
           body: |
             Automated `pom.xml` version bump after publishing [v${{ steps.version.outputs.new }}](https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.new }}).
 
