@@ -15,9 +15,6 @@ commands:
   oacallback:
     description: Internal callback command for chat UI
     usage: '/oacallback <uuid>'
-  admintags:
-    description: Manage tags
-    usage: '/admintags'
   assess-habitat:
     description: command to assess habitat
     usage: '/assess-habitat'

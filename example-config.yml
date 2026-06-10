@@ -1,4 +1,4 @@
-mysql:
+﻿mysql:
   host: localhost
   port: 3306
   database: ""
@@ -8,7 +8,12 @@ mysql:
 journey:
   journey-command-root: journey
   debug-log: false
-expiration-days: 7
+  linked-world-prefix: ""
+  linked-world-min-siblings: 2
+  include-poi-regions: true
+  poi-region-prefix: "poi-"
+  poi-source: both
+  worldguard-table-prefix: rg_
 agent_type: scientist_casual
 # Blocks above ground for non-player agent mobs (no gravity + height lock). Player-shaped agents ignore this. Use 0 to disable vertical tracking (only no-gravity).
 agent-non-player-hover-height: 2.0
@@ -22,6 +27,10 @@ agent-player-follow-margin: 2.5
 agent-player-nav-destination-teleport-margin: -1
 # Ticks the NPC can stand still before navigation is cancelled as STUCK; higher avoids premature cancel on slow paths.
 agent-player-nav-stationary-ticks: 1200
+# When horizontal distance to the owner exceeds this, the agent catch-up teleports beside them (not on top).
+agent-follow-catch-up-distance: 16.0
+# Blocks to the side of the player when catch-up teleporting.
+agent-follow-catch-up-offset: 1.5
 # Mob agents (hovering): tighter path range and margin so they keep up while floating.
 agent-mob-follow-path-range: 5
 agent-mob-follow-margin: 1.25
@@ -34,7 +43,7 @@ llm:
   api-key: ""
   api-key-env: ""
   model: ""
-  # openai_compatible only — Ollama default http://127.0.0.1:11434/v1 , LM Studio http://127.0.0.1:1234/v1
+  # openai_compatible only â€” Ollama default http://127.0.0.1:11434/v1 , LM Studio http://127.0.0.1:1234/v1
   base-url: ""
   request-timeout-seconds: 60
   system-prompt: "You are a friendly in-game science education assistant. Answer clearly and briefly; keep content appropriate for students."
@@ -49,251 +58,6 @@ llm:
       - txt
       - md
 
-tags:
-  num_tags:
-    NoMoon: 25
-    ColderStrip: 25
-    ColderCold: 25
-    ColderHot: 25
-    TiltedFrozen: 25
-    TiltedWarm: 25
-    TiltedMelting: 25
-    MynoaClose: 25
-    MynoaHalf: 25
-    MynoaFar: 25
-    TwoMoons: 25
-    TwoMoonsLluna: 25
-    TwoMoonsLow: 25
-  feedback:
-    holo_visible: false
-    enabled: true
-    default: "Great observation! I'll take note of your discovery. Please continue thinking about the science concepts unique to this world. Feel free to show me something else or ask me about anything!"
-  NoMoon:
-    - tag:
-      aliases: tree
-      feedback: "The trees look kinda funny don't they? This is a really neat effect of the extreme wind as a result of having no moon. Why do you think they look this way?"
-    - tag:
-      aliases: dirt, grass
-      feedback: "Isn't it so different over here than on the other side of the map. Natural barriers block the high speed winds. Why do you think there is an area with grass and the other with dirt?"
-    - tag:
-      aliases: windmill
-      feedback: "Good catch! Without the gravity of the moon the Earth rotates faster making it windier. Why do you think there is a giant windmill here?"
-    - tag:
-      aliases: night, sky, moon
-      feedback: "You are definitely right the sky looks a little different than what we are used to. On this hypothetical world there is no moon. How do you think this changes things on Earth?"
-    - tag:
-      aliases: greenhouse, house, lab
-      feedback: "Great observation! The scientists are using a greenhouse to grow crops. Why do you think they are doing this? Remember the wind is a lot stronger here than what we are used to."
-    - tag:
-      aliases: hill
-      feedback: "This is very important! This hill acts as a natural barrier to wind. How do you think this changes the landscape?"
-    - tag:
-      aliases: water, spring
-      feedback: "This is very cool! Did you check the water in the pond? What is different? Try checking science tools in there and see what is different."
-    - tag:
-      aliases: wind, sign
-      feedback: "This is one of the most important differences on this planet. There is high winds due to having no moon. How might this change how we get out energy?"
-    - tag:
-      aliases: npc, carl, tanya, kwali
-      feedback: "You talked to my fellow scientist! Why do you think what they said is important?"
-    - tag:
-      aliases: vegetation, crop
-      feedback: "There is vegetation on Earth with no moon. What other aspects are unique here?"
-    - tag:
-      aliases: cave
-      feedback: "Caves are natural forming on Earth. What other aspects are unique here?"
-    - tag:
-      aliases: animal
-      feedback: "Animals can live on Earth with no moon. What other aspects are unique here?"
-  ColderStrip:
-    - tag:
-      aliases: sun
-      feedback: "Great observation! The Earth here is tidally locked so parts of Earth will always face the sun, parts will never face the sun, and parts will always get a little sun. How might this effect the weather and life based on the location of this area?"
-    - tag:
-      aliases: jungle, forrest
-      feedback: "Nice job! The Earth here is tidally locked so parts of Earth will always face the sun, parts will never face the sun, and parts will always get a little sun. Why is there a jungle here and not in the other areas on this planet?"
-    - tag:
-      aliases: bridge
-      feedback: "There is a really large bridge on this map. What other aspects of this world are unique here?"
-    - tag:
-      aliases: npc, jorge
-      feedback: "You talked to my fellow scientist! Why do you think what they said is important?"
-  ColderCold:
-    - tag:
-      aliases: snow, tundra
-      feedback: "Nice observation! The Earth here is tidally locked so parts of Earth will always face the sun, parts will never face the sun, and parts will always get a little sun. Why is it snowing here but not in the other areas on this planet?"
-    - tag:
-      aliases: cave
-      feedback: "Great job noticing the cave, it is actually very important for life here! Why do you think underground facilities are so important for life on this area of the planet?"
-    - tag:
-      aliases: moon
-      feedback: "Great observation! The Earth here is tidally locked so parts of Earth will always face the sun, parts will never face the sun, and parts will always get a little sun. How might this effect the weather and life based on the location of this area?"
-    - tag:
-      aliases: npc, jack, vera, engineer, hydro, power, controller
-      feedback: "You talked to my fellow scientist! Why do you think what they said is important?"
-    - tag:
-      aliases: plant, crop
-      feedback: "You noticed the plants! How are they growing here when the outside weather is so cold? Think about the importance of underground facilities and try checking science tools here."
-  ColderHot:
-    - tag:
-      aliases: sun
-      feedback: "Great observation! The Earth here is tidally locked so parts of Earth will always face the sun, parts will never face the sun, and parts will always get a little sun. How might this effect the weather and life based on the location of this area?"
-    - tag:
-      aliases: desert
-      feedback: "Nice observation! The Earth here is tidally locked so parts of Earth will always face the sun, parts will never face the sun, and parts will always get a little sun. Why is it so hot here but not in the other areas on this planet?"
-    - tag:
-      aliases: cave
-      feedback: "You noticed the cave in the desert, this is actually essential for life here! Why are caves and underground areas important on this area of the planet?"
-    - tag:
-      aliases: solar, panel
-      feedback: "Great observation, these solar panels are really important for energy production. Why do you think solar is a good option for energy here?"
-    - tag:
-      aliases: npc, damien, josephina, anita, pierre
-      feedback: "You talked to my fellow scientist! Why do you think what they said is important?"
-  TiltedFrozen:
-    - tag:
-      aliases: dark
-      feedback: "It is really dark isn't it! Earth's 23.5 degree tilt create the seasons that we normally experience, so being tilted 90 degrees can make the seasons more extreme. Why do you think this season is so dark and cold?"
-    - tag:
-      aliases: helicopter
-      feedback: "You found the helicopter! Make sure you enter it and swim below the buoy."
-    - tag:
-      aliases: buoy, dingy, raft
-      feedback: "You found the buoy! Make sure you swim to the bottom of the ocean to see what life is down there."
-    - tag:
-      aliases: tundra, winter
-      feedback: "You noticed the tundra and winter-like environment! Earth's tilt create the seasons that we normally experience, so being tilted 90 degrees can make the seasons more extreme. How does the extra tilt of this Earth contribute to this extreme weather?"
-    - tag:
-      aliases: animal, bear, rabbit, bunny, axolotl, salamander, fish, bird
-      feedback: "You found the animals! The extreme seasons will greatly effect how animals will migrate and adapt to survive. Why do you think they moved here to survive the extreme cold?"
-    - tag:
-      aliases: water, ice
-      feedback: "Nice job noticing the ice! Earth's 23.5 degree tilt create the seasons that we normally experience, so being tilted 90 degrees can make the seasons more extreme. Why is there so much ice and how do you expect the environment to change when we time travel one more time?"
-    - tag:
-      aliases: tower
-      feedback: "Great job noticing the tower! Were you able to talk to the scientists?"
-    - tag:
-      aliases: vent
-      feedback: "Great observation you noticed the undersea vent! Earth's 23.5 degree tilt create the seasons that we normally experience, so being tilted 90 degrees can make the seasons more extreme. What does this sea vent provide for sea life?"
-    - tag:
-      aliases: coral
-      feedback: "You noticed the coral! Earth's tilt has made the oceans much cooler, which has an impact on where sea life can thrive. How is the coral surviving in this harsh environment?"
-  TiltedWarm:
-    - tag:
-      aliases: npc, clara, astrochemist, mechanic, scientist, ornithologist, herpetologist
-      feedback: "You talked to my fellow scientist! Why do you think what they said is important?"
-    - tag:
-      aliases: animal, bear, rabbit, bunny, axolotl, bird, salamander, fish
-      feedback: "You found the animals! Earth's 23.5 degree tilt create the seasons that we normally experience, so being tilted 90 degrees can make the seasons more extreme. How do you think their locations will change based on the season?"
-    - tag:
-      aliases: helicopter
-      feedback: "You found the helicopter! Make sure you enter it and swim below the buoy."
-    - tag:
-      aliases: buoy, dingy, raft
-      feedback: "You found the buoy! Make sure you swim to the bottom of the ocean to see what life is down there."
-    - tag:
-      aliases: water
-      feedback: "Great observation about the water! Earth's 23.5 degree tilt create the seasons that we normally experience, so being tilted 90 degrees can make the seasons more extreme. What do you think will happen to it after you time travel and how does this relate to being tilted?"
-    - tag:
-      aliases: tower
-      feedback: "Great job noticing the tower! Were you able to talk to the scientists?"
-  TiltedMelting:
-    - tag:
-      aliases: npc, scientist, ornithologist, herpetologist
-      feedback: "You talked to my fellow scientist! Why do you think what they said is important?"
-    - tag:
-      aliases: spring, plants, vegetation
-      feedback: "Nice observation about the change to a Spring-like environment! Earth's 23.5 degree tilt create the seasons that we normally experience, so being tilted 90 degrees can make the seasons more extreme. How does the change in season change life here for plants?"
-    - tag:
-      aliases: animal, bear, rabbit, bunny, axolotl, bird, salamander, fish
-      feedback: "You found the animals! Earth's 23.5 degree tilt create the seasons that we normally experience, so being tilted 90 degrees can make the seasons more extreme. Why do you think they have moved here when the ice has begun to melt?"
-    - tag:
-      aliases: water, ice, melt
-      feedback: "Great observation about the ice melting! The extreme winter-like conditions are ending and this will cause the environment to drastically change for life. Why do you think the ice is melting and how will this change life here?"
-    - tag:
-      aliases: tower
-      feedback: "Great job noticing the tower! Were you able to talk to the scientists?"
-    - tag:
-      aliases: helicopter
-      feedback: "You found the helicopter! Make sure you enter it and swim below the buoy."
-    - tag:
-      aliases: buoy, dingy, raft
-      feedback: "You found the buoy! Make sure you swim to the bottom of the ocean to see what life is down there."
-  MynoaClose:
-    - tag:
-      aliases: planet
-      feedback: "Isn't it hard to miss the giant planet Tyran in the sky! How do you think this would effect life on this side of Mynoa? Try checking science tools over here."
-    - tag:
-      aliases: water, tide
-      feedback: "Nice observation about the water! The giant planet Tyran in the sky can have massive effects on the gravity. How do you think the gravity has effected the tides here?"
-    - tag:
-      aliases: eclipse, blocking
-      feedback: "You noticed the eclipse! Based on where we are in relation to the giant planet Tyran and the sun it is possible for it to be pitch black. Do you think it will always be dark on this side?"
-    - tag:
-      aliases: creature, animal, npc
-      feedback: "You noticed the Mynoan creature! Living beings might look different here based on the effects of having Tyran nearby. How do they need to adapt on this side of Mynoa to survive and how might this make them look the way they do?"
-  MynoaHalf:
-    - tag:
-      aliases: npc, mynoa, person
-      feedback: "You talked to the Mynoan! Why do you think what they said is important?"
-    - tag:
-      aliases: temperature, hot, lava, volcan, terrain
-      feedback: "Great observation, it is dangerous on this side! Tyran can massively effect gravity and other science tools that would have major impacts on the surroundings. Why do you think this side so hot and full of lava?"
-    - tag:
-      aliases: tectonic
-      feedback: "You noticed the tectonic differences! Tyran can change things like gravity that can cause tectonic plates to move. How might this shape the landscape?"
-    - tag:
-      aliases: magnet, gravity
-      feedback: "Great job measuring these science tools! Why do you think it's like this and how is it different from Earth? Think about the size and closeness of Tyran and how that can effect it."
-  MynoaFar:
-    - tag:
-      aliases: npc, worker, citizen
-      feedback: "You talked to my fellow npcs! Why do you think what they said is important?"
-    - tag:
-      aliases: museum
-      feedback: "Nice job finding the museum! Did you learn anything from the workers or models?"
-    - tag:
-      aliases: life, people, plants
-      feedback: "You noticed the life here. Being further from Tyran makes the surroundings much different! What is different here that makes this area special compared to the other areas?"
-  TwoMoons:
-    - tag:
-      aliases: npc, tobias, kristina
-      feedback: "You talked to my fellow npcs! Why do you think what they said is important?"
-    - tag:
-      aliases: moon
-      feedback: "Nice observation about the moons! Having two moons will change the gravity on this Earth. How will this effect the tides?"
-    - tag:
-      aliases: buoy, tides
-      feedback: "You noticed the tides! The two moons will pull on the Earth and will cause gravity to change. How does this make the tides higher?"
-    - tag:
-      aliases: museum
-      feedback: "You found the museum! Did you learn anything from the npcs or models?"
-    - tag:
-      aliases: time, rotation, day
-      feedback: "Great job measuring the science variables! The two moons will pull on the Earth and change the speed at which it rotates. How does having two moons contribute to the speed of Earth's rotation here?"
-  TwoMoonsLluna:
-    - tag:
-      aliases: npc, astronaut
-      feedback: "You talked to the astronaut! Why do you think what they said is important?"
-    - tag:
-      aliases: volcano, moon, surface
-      feedback: "Nice observation about the surface of the moon! Having the Earth and other moon pulling on this moon can cause things like gravity to change. How do you think this contributes to the environment here?"
-  TwoMoonsLow:
-    - tag:
-      aliases: npc, worker, kristina
-      feedback: "You talked to my fellow npcs! Why do you think what they said is important?"
-    - tag:
-      aliases: moon
-      feedback: "Nice observation about the moons! Having two moons will change the gravity on this Earth. How will this effect the tides?"
-    - tag:
-      aliases: buoy, tides
-      feedback: "You noticed the tides! The two moons will pull on the Earth and will cause gravity to change. How does this make the tides lower?"
-    - tag:
-      aliases: museum
-      feedback: "You found the museum! Did you learn anything from the npcs or models?"
-    - tag:
-      aliases: time, rotation, day
-      feedback: "Great job measuring the science variables! The two moons will pull on the Earth and change the speed at which it rotates. How does having two moons contribute to the speed of Earth's rotation here?"
 prompts:
   - label: 0
     prompt: agent
@@ -424,7 +188,7 @@ template-gui:
     guidance-response: "&f&nCan you show me something cool?"
     show-response: "&f&nI want to show you/ask about something unique to this environment!"
     score-response: "&f&nI want to see my scores"
-    tag-score-response: "&f&nI want to see my tag scores"
+    build-response: "&f&nI want to build something!"
     agent-edit: "&f&nI want to edit my agent"
   filler-item: white_stained_glass_pane
   inventory-name: "&lTopics"

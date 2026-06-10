@@ -1,0 +1,74 @@
+# Publishes a downloadable JAR to GitHub Releases only.
+# Minecraft server install is manual — no deploy steps or secrets.
+name: Release
+
+on:
+  push:
+    branches: [main, animal-ai]
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    # Skip version-bump commits and merges of version-bump PRs to avoid release loops.
+    if: ${{ !contains(github.event.head_commit.message, 'chore(release):') && !contains(github.event.head_commit.message, 'release/bump-') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Bump patch version in pom.xml
+        id: version
+        run: |
+          CURRENT="$(mvn -B -ntp help:evaluate -Dexpression=project.version -q -DforceStdout)"
+          IFS='.' read -r major minor patch <<< "${CURRENT//-SNAPSHOT/}"
+          NEW="${major}.${minor}.$((patch + 1))"
+          echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
+          echo "new=${NEW}" >> "$GITHUB_OUTPUT"
+          mvn -B -ntp org.codehaus.mojo:versions-maven-plugin:2.17.1:set \
+            -DnewVersion="${NEW}" \
+            -DgenerateBackupPom=false
+
+      - name: Build release JAR
+        run: mvn -B -ntp package
+
+      - name: Publish GitHub Release
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          JAR="target/WHIMC-QRF-Agent-${NEW_VERSION}.jar"
+          test -f "${JAR}"
+
+          gh release create "v${NEW_VERSION}" \
+            "${JAR}" \
+            --title "v${NEW_VERSION}" \
+            --target "${GITHUB_SHA}" \
+            --generate-notes
+
+      - name: Open version bump pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: release/bump-${{ steps.version.outputs.new }}
+          delete-branch: true
+          title: "chore(release): bump version to ${{ steps.version.outputs.new }}"
+          commit-message: "chore(release): bump version to ${{ steps.version.outputs.new }}"
+          body: |
+            Automated `pom.xml` version bump after publishing [v${{ steps.version.outputs.new }}](https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.new }}).
+
+            Download the JAR from the GitHub Release and install it on the Minecraft server manually.
+          labels: release
+          add-paths: pom.xml

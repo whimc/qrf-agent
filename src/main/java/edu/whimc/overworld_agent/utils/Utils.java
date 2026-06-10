@@ -14,7 +14,6 @@ import java.util.Date;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import edu.whimc.overworld_agent.dialoguetemplate.Tag;
 
 public class Utils {
 
@@ -158,21 +157,6 @@ public class Utils {
                 .map(World::getName)
                 .sorted()
                 .collect(Collectors.toList());
-    }
-
-    public static Tag getTagWithError(CommandSender sender, String strId) {
-        Integer id = parseIntWithError(sender, strId);
-        if (id == null) {
-            return null;
-        }
-        Tag tag = Tag.getTagByID(id);
-
-        if (tag == null) {
-            Utils.msg(sender, "&c\"&4" + id + "&c\" is not a valid tag id!");
-            return null;
-        }
-
-        return tag;
     }
 
 }

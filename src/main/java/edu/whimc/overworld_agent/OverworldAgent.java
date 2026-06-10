@@ -8,13 +8,11 @@ import edu.whimc.overworld_agent.dialoguetemplate.BuilderDialogue;
 import edu.whimc.overworld_agent.dialoguetemplate.ChatTextInputFactory;
 import edu.whimc.overworld_agent.dialoguetemplate.SpigotCallback;
 import edu.whimc.overworld_agent.dialoguetemplate.SignMenuFactory;
-import edu.whimc.overworld_agent.dialoguetemplate.Tag;
 import edu.whimc.overworld_agent.dialoguetemplate.models.LlmProvider;
 import edu.whimc.overworld_agent.dialoguetemplate.models.NoOpLlmProvider;
 import edu.whimc.overworld_agent.dialoguetemplate.models.llm.LlmProviderFactory;
 import edu.whimc.overworld_agent.dialoguetemplate.models.llm.LlmRagContextBuilder;
 import edu.whimc.overworld_agent.dialoguetemplate.models.BuildTemplate;
-import edu.whimc.overworld_agent.dialoguetemplate.models.DialogueType;
 import edu.whimc.overworld_agent.utils.sql.Queryer;
 
 import org.bukkit.Bukkit;
@@ -53,7 +51,6 @@ import org.bukkit.event.Listener;
  */
 public class OverworldAgent extends JavaPlugin {
     private Map<String, NPC> agents;
-    private DialogueType agentType;
     private Queryer queryer;
     private List<String> profanity;
     private SignMenuFactory signMenuFactory;
@@ -78,11 +75,9 @@ public class OverworldAgent extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
         //receiver = (SpeechReceiver) Bukkit.getServer().getPluginManager().getPlugin("SpeechReceiver");
-        agentType = DialogueType.GUIDE;
         sessions = new HashMap<>();
         buildTemplates = new HashMap<>();
         inProgressTemplates = new HashMap<>();
-        Tag.instantiate(this);
 
         this.queryer = new Queryer(this, q -> {
             // If we couldn't connect to the database disable the plugin
@@ -93,8 +88,6 @@ public class OverworldAgent extends JavaPlugin {
             }
 
         });
-
-        Tag.startExpiredObservationScanningTask(this);
 
         //check if Citizens is present and enabled.
         agents = new HashMap<>();
@@ -114,6 +107,7 @@ public class OverworldAgent extends JavaPlugin {
         net.citizensnpcs.api.CitizensAPI.getTraitFactory().registerTrait(net.citizensnpcs.api.trait.TraitInfo.create(SpawnNoviceTrait.class).withName("noviceagentspawn"));
         net.citizensnpcs.api.CitizensAPI.getTraitFactory().registerTrait(net.citizensnpcs.api.trait.TraitInfo.create(SpawnExpertTrait.class).withName("expertagentspawn"));
         net.citizensnpcs.api.CitizensAPI.getTraitFactory().registerTrait(net.citizensnpcs.api.trait.TraitInfo.create(AgentPermanentFlyingTrait.class).withName("agentpermanentflying"));
+        net.citizensnpcs.api.CitizensAPI.getTraitFactory().registerTrait(net.citizensnpcs.api.trait.TraitInfo.create(AgentFollowCatchUpTrait.class).withName("agentfollowcatchup"));
 
         expertSpawnCommand = new ExpertSpawnCommand(this, "agents", "spawn");
 
@@ -124,10 +118,6 @@ public class OverworldAgent extends JavaPlugin {
         AgentsCommand agentsCommand = new AgentsCommand(this);
         getCommand("agents").setExecutor(agentsCommand);
         getCommand("agents").setTabCompleter(agentsCommand);
-
-        TagAdminCommand tagCommand = new TagAdminCommand(this);
-        getCommand("admintags").setExecutor(tagCommand);
-        getCommand("admintags").setTabCompleter(tagCommand);
 
         HabitatAssessCommand assessCommand = new HabitatAssessCommand(this);
         getCommand("assess-habitat").setExecutor(assessCommand);
@@ -347,7 +337,5 @@ public class OverworldAgent extends JavaPlugin {
     public void setSkinType(String skinType){
         this.skinType = skinType;
     }
-    public void setAgentType(DialogueType type){this.agentType = type;}
-    public DialogueType getAgentType(){return agentType;}
 
 }

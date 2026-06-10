@@ -2,10 +2,8 @@ package edu.whimc.overworld_agent.commands.subcommands;
 
 import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.commands.AbstractSubCommand;
-import edu.whimc.overworld_agent.dialoguetemplate.BuilderDialogue;
 import edu.whimc.overworld_agent.dialoguetemplate.Dialogue;
 import edu.whimc.overworld_agent.dialoguetemplate.models.Chatbot;
-import edu.whimc.overworld_agent.dialoguetemplate.models.DialogueType;
 import edu.whimc.overworld_agent.dialoguetemplate.models.LlmProvider;
 import edu.whimc.overworld_agent.llm.context.AgentChatContextItem;
 import edu.whimc.overworld_agent.llm.context.AgentChatEvent;
@@ -71,19 +69,11 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
             player = (Player) sender;
         }
 
-        if (plugin.getAgentType().equals(DialogueType.GUIDE)) {
-            plugin.ensureAgentEdits(player);
-            Dialogue dialogue = new Dialogue(plugin, player, text, embodied);
-            dialogue.doDialogue();
-        } else {
-            if (plugin.getInProgressTemplates().containsKey(player)) {
-                BuilderDialogue bd = plugin.getInProgressTemplates().get(player);
-                bd.doDialogue();
-            } else {
-                BuilderDialogue bd = new BuilderDialogue(plugin, player, embodied);
-                bd.doDialogue();
-            }
-        }
+        // Single merged menu: guide options (guidance, scores, discussion, edit) plus the
+        // builder submenu (templates, base feedback) — no /agents chat_type switch needed.
+        plugin.ensureAgentEdits(player);
+        Dialogue dialogue = new Dialogue(plugin, player, text, embodied);
+        dialogue.doDialogue();
 
         return true;
     }
@@ -206,7 +196,8 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
         String playerResearchId = playerUuid; // Replace later with a de-identified research ID if needed.
         String sessionId = session.sessionId();
         String worldName = player.getWorld().getName();
-        String agentType = plugin.getAgentType().name();
+        // Research-log label; the old Guide/Builder mode switch was removed (menus are merged).
+        String agentType = "GUIDE";
         String agentName = "interactive-chat-agent";
 
         String providerName = plugin.getConfig().getString("llm.provider", "unknown");

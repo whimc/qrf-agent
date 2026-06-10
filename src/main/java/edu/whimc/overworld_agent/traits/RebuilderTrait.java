@@ -90,8 +90,11 @@ public class RebuilderTrait extends Trait {
         if(npc.isSpawned() && target != null && Bukkit.getPlayer(target) != null){
             if (!npc.getEntity().getWorld().equals(Bukkit.getPlayer(target).getWorld())) {
                 if (Settings.Setting.FOLLOW_ACROSS_WORLDS.asBoolean()) {
+                    Player follower = Bukkit.getPlayer(target);
                     npc.despawn();
-                    npc.spawn(Bukkit.getPlayer(target).getLocation());
+                    npc.spawn(AgentFollowCatchUp.besidePlayer(follower, AgentFollowCatchUp.besideOffset(plugin)));
+                    AgentFollowTuning.applyForCurrentEntity(plugin, npc);
+                    AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, follower);
                 }
                 return;
             }
