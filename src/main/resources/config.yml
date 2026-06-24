@@ -25,6 +25,10 @@ journey:
   # Table prefix for WorldGuard MySQL storage (rg_region, rg_world).
   worldguard-table-prefix: rg_
 agent_type: scientist_casual
+
+# Player spawn: /agent spawn player --url <https://direct-png-link> <name> (uses Citizens/Mineskin, like /npc skin --url)
+agent-spawn:
+  allow-url-skins: true
 # Blocks above ground for non-player agent mobs (no gravity + height lock). Player-shaped agents ignore this. Use 0 to disable vertical tracking (only no-gravity).
 agent-non-player-hover-height: 2.0
 # Multiplier applied to Citizens navigator speed for non-player agents (1.0 = default mob follow speed). Higher = faster when hovering/following.

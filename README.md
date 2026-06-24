@@ -8,9 +8,10 @@ Alternatively you can spawn a guide agent with **`/agent spawn`** (`/agents` is 
 
 **Spawn syntax**
 
-- **Player agent:** `/agent spawn player <skin> <name…>` — first tab-completion token is `player`, second is a skin key from `skins.<agent_type>` in `config.yml`, then the display name (spaces allowed in the name).
-- **Animal agent:** `/agent spawn <animal> <name…>` — `<animal>` is one of the **fixed** mob IDs allowed by `AgentEntityTypes` (see that class / tab-complete: e.g. `axolotl`, `ocelot`, `turtle`, `sheep`, `pig`, `strider`, `sniffer`, `nautilus`, `happy_ghast`, `bee`, `parrot`; types not present on your game version are omitted at runtime). No skin argument.
-- **Legacy:** `/agent spawn <skin> <name…>` — if the first token is not a valid entity type, it is treated as a **player** skin key (same as omitting `player`).
+- **Player agent (config skin):** `/agent spawn player <skin> <name…>` — skin key from `skins.<agent_type>` in `config.yml`.
+- **Player agent (custom URL):** `/agent spawn player --url <https://…> <name…>` — direct **https** link to a **.png** skin (same Mineskin flow as Citizens `/npc skin --url`). Optional `--slim` for slim arms. Set `agent-spawn.allow-url-skins: false` to disable.
+- **Animal agent:** `/agent spawn <animal> <name…>` — mob ID from `AgentEntityTypes` (tab-complete). No skin argument.
+- **Legacy:** `/agent spawn <skin> <name…>` — first token treated as a **player** skin key if it is not a valid entity type.
 
 Tab-complete the first argument to see every allowed value on your server version.
 
@@ -95,6 +96,8 @@ Other useful keys: `llm.model`, `llm.base-url` (for `openai_compatible` only), `
 
 RAG (retrieval-augmented generation) here means: **optional** inclusion of plain-text files from a designated folder into the **system** prompt so the model can ground answers in your own notes.
 
+**Full guide:** [How LLM reference material (RAG) works](docs/llm-rag.md) — directory layout, per-world vs global paths, file parsing, limits, and what this plugin does *not* do (no vector DB or query-time retrieval).
+
 | Key | Description |
 |-----|-------------|
 | `llm.context-directory` | Subfolder name under the plugin **data folder** (default `llm-context`). Created on enable when possible. Full path: `plugins/WHIMC-QRF-Agent/llm-context`. |
@@ -103,7 +106,7 @@ RAG (retrieval-augmented generation) here means: **optional** inclusion of plain
 | `llm.rag.max-directory-depth` | How deep to walk subfolders. |
 | `llm.rag.include-extensions` | File extensions to read (default `txt`, `md`, `doc`, `docx`). Word files are converted to plain text via Apache POI. |
 
-Put glossaries, world lore, or lesson snippets as `.md`, `.txt`, `.doc`, or `.docx` files there. This is **not** a vector database or hybrid search—only a simple file concat for small corpora; you can replace the flow later with a custom `LlmProvider` that does real retrieval.
+Put glossaries, world lore, or lesson snippets as `.md`, `.txt`, `.doc`, or `.docx` files there. See [docs/llm-rag.md](docs/llm-rag.md) for behavior details.
 
 #### Per-world prompts (`world-prompts/`)
 
@@ -114,11 +117,11 @@ Long or world-specific system prompts live in **`plugins/WHIMC-QRF-Agent/world-p
 | `world` | Single Bukkit world name this prompt applies to. |
 | `worlds` | List of world names sharing one prompt (e.g. `ColderStrip`, `ColderHot`, `ColderCold`). |
 | `prompt` | Multi-line system prompt text for those worlds. |
-| `rag-directory` | Optional folder under the plugin data directory for world-specific RAG (overrides global `llm.context-directory` for that world). |
+| `rag-directory` | Optional folder under the plugin data directory for world-specific RAG (see [docs/llm-rag.md](docs/llm-rag.md)). |
 
 If no file matches the player's world, **`world-prompts/default.yml`** is used; if that is missing, the plugin falls back to **`llm.system-prompt`** in `config.yml`.
 
-**Per-world `rag-directory`** (in a world-prompt YAML) is appended whenever that world’s prompt is built — it does **not** require `llm.rag.enabled: true` in the main config. Global `llm.rag` only applies to the fallback `llm.system-prompt` path.
+**Per-world `rag-directory`** is documented in [docs/llm-rag.md](docs/llm-rag.md#two-ways-reference-files-get-attached). In short: it does **not** require `llm.rag.enabled: true` in the main config.
 
 Reload without restart: **`/agent reload_llm_prompt`** (optional world name). In-game output shows prompt size; **`(RAG appended)`** means files from `rag-directory` were included. For a per-file list, check the server console **`[OverworldAgent][LLM]`** block on startup/reload (or set `llm.debug-log: true`).
 
