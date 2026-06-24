@@ -71,6 +71,8 @@ public class Dialogue implements Listener {
     private String discussionConversationId;
     private String discussionSessionId;
     private int discussionTurnIndex;
+    private DialoguePrompt builtInUnknownPrompt;
+
     public Dialogue(OverworldAgent plugin, Player player, boolean text, boolean embodied) {
         this.spigotCallback = plugin.getSpigotCallback();
         this.plugin = plugin;
@@ -1296,6 +1298,41 @@ public class Dialogue implements Listener {
         sendBackOption(this::doDialogue);
     }
 
+    /**
+     * Resolves a PMML label to a configured prompt, then {@link #UNKNOWN_LABEL}, then a built-in fallback.
+     * Live servers with truncated {@code prompts} lists (missing label -2) used to NPE here during discussion.
+     */
+    private DialoguePrompt resolvePrompt(int label) {
+        DialoguePrompt configured = prompts.get(label);
+        if (configured != null) {
+            return configured;
+        }
+        if (label != UNKNOWN_LABEL) {
+            plugin.getLogger().warning(
+                    "[OverworldAgent] Missing prompts entry for label " + label + " in config.yml; using unknown.");
+        }
+        DialoguePrompt unknown = prompts.get(UNKNOWN_LABEL);
+        if (unknown != null) {
+            return unknown;
+        }
+        plugin.getLogger().warning(
+                "[OverworldAgent] Missing prompts label -2 (unknown) in config.yml; using built-in fallback.");
+        return builtInUnknownPrompt();
+    }
+
+    private DialoguePrompt builtInUnknownPrompt() {
+        if (builtInUnknownPrompt == null) {
+            Map<String, Object> entry = new HashMap<>();
+            entry.put("prompt", "unknown");
+            entry.put("tool", null);
+            entry.put(
+                    "feedback",
+                    "Sorry I am not sure about this. Try talking to me about something else or maybe ask an instructor about this feature."
+            );
+            builtInUnknownPrompt = new DialoguePrompt(entry);
+        }
+        return builtInUnknownPrompt;
+    }
 
     private void doResponse() {
         DialoguePrompt prompt = null;
@@ -1305,12 +1342,10 @@ public class Dialogue implements Listener {
             int predictedClass = (int) prediction[0];
             double certainty = prediction[1];
             if (certainty > THRESHOLD) {
-                prompt = prompts.get(predictedClass);
-                if (prompt == null) {
-                    prompt = prompts.get(UNKNOWN_LABEL);
-                    feedback = prompt.getFeedback();
-                } else {
-                    feedback = prompt.getFeedback();
+                DialoguePrompt matched = prompts.get(predictedClass);
+                prompt = matched != null ? matched : resolvePrompt(UNKNOWN_LABEL);
+                feedback = prompt.getFeedback();
+                if (matched != null) {
                     this.fillIn();
                 }
                 if (prompt.getPrompt().equalsIgnoreCase("quest")) {
@@ -1353,7 +1388,7 @@ public class Dialogue implements Listener {
                     });
                 }
             } else {
-                prompt = prompts.get(UNKNOWN_LABEL);
+                prompt = resolvePrompt(UNKNOWN_LABEL);
                 feedback = prompt.getFeedback();
 
             }
