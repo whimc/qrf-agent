@@ -4,9 +4,12 @@
   database: ""
   username: ""
   password: ""
-# Guidance uses Journey public waypoints: command root must match Journey's primary label (default "journey"; alias "jo" if you use that).
+# Guidance uses Journey public waypoints. dispatch-command: auto avoids /jt scope-merge crashes (Duplicate key).
 journey:
   journey-command-root: journey
+  journeyto-command-root: jt
+  # auto | server_waypoint | journeyto_scoped | journeyto_plain | server_waypoint_display
+  dispatch-command: auto
   debug-log: false
   linked-world-prefix: ""
   linked-world-min-siblings: 2
@@ -47,7 +50,10 @@ llm:
   base-url: ""
   request-timeout-seconds: 60
   system-prompt: "You are a friendly in-game science education assistant. Answer clearly and briefly; keep content appropriate for students."
-  # Folder under the plugin data directory for RAG source files (txt/md). Safe to add lore, scripts, glossaries.
+  # Per-world prompts: plugins/WHIMC-QRF-Agent/world-prompts/*.yml
+  # Use worlds: for shared prompts. Reload: /agent reload_llm_prompt
+  # Global context-directory used when llm.rag.enabled; per-world rag-directory in world-prompts/*.yml is separate.
+  debug-log: false
   context-directory: llm-context
   rag:
     enabled: false
@@ -57,6 +63,15 @@ llm:
     include-extensions:
       - txt
       - md
+      - doc
+      - docx
+  npc-context:
+    enabled: true
+    radius: 25.0
+    max-items: 3
+  journey-actions:
+    enabled: true
+    max-destinations: 60
 
 prompts:
   - label: 0

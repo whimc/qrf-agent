@@ -330,27 +330,21 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
             logStage(traceId, "NPC_CONTEXT", "NPC context is disabled.");
         }
 
-        String baseSystemPrompt = plugin.getConfig().getString(
-                "llm.system-prompt",
-                "You are a friendly in-game science education assistant. Answer clearly and briefly; keep content appropriate for students."
-        );
-
         String systemPrompt;
 
         try {
-            logStage(traceId, "PROMPT_BASE",
-                    "Base system prompt length: " + baseSystemPrompt.length() + " characters");
+            systemPrompt = plugin.buildLlmSystemPrompt(player);
 
-            logStage(traceId, "RAG_CONTEXT", "Starting system prompt augmentation.");
-            systemPrompt = plugin.augmentLlmSystemPrompt(baseSystemPrompt);
+            logStage(traceId, "PROMPT_BASE",
+                    "System prompt length: " + systemPrompt.length() + " characters (world="
+                            + worldName + ")");
 
             if (!npcPromptContext.isBlank()) {
                 systemPrompt = systemPrompt + npcPromptContext;
             }
 
             logStage(traceId, "RAG_CONTEXT",
-                    "Finished system prompt augmentation. Final system prompt length: " +
-                            systemPrompt.length() + " characters");
+                    "Final system prompt length: " + systemPrompt.length() + " characters");
 
         } catch (Exception e) {
             String error = "Failed while preparing system prompt/context: " +

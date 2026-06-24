@@ -103,53 +103,149 @@ public class Dialogue implements Listener {
             plugin.getLogger().fine("[OverworldAgent][Journey] dispatch skipped: empty destination for " + player.getName());
             return;
         }
-        // Public waypoint lookups use name_id (lowercase in SQL); resolve display names to name_id when needed.
-        String nameId = resolveJourneyPublicNameId(rawDestination);
-        String journeyRoot = plugin.getConfig().getString("journey.journey-command-root", "journey");
-        String cmd = journeyRoot + " server waypoint " + quoteIfNeeded(nameId);
+        FileConfiguration cfg = plugin.getConfig();
+        String nameId = resolveJourneyPublicNameId(destination);
+        Object manager = journeyPublicWaypointManager();
+        Object waypoint = manager == null ? null : invokeGetWaypoint(manager, nameId);
+        String displayName = waypoint == null ? null : extractWaypointName(waypoint);
+        Integer waypointDomain = waypoint == null ? null : waypointCellDomain(waypoint);
+        Integer playerDomain = journeyDomainForWorldSafe(player.getWorld());
+
+        String journeyRoot = cfg.getString("journey.journey-command-root", "journey");
+        String journeytoRoot = StringUtils.trimToEmpty(cfg.getString("journey.journeyto-command-root", "jt"));
+        if (journeytoRoot.isBlank()) {
+            journeytoRoot = "jt";
+        }
+        List<String> commands = buildJourneyDispatchCommands(cfg, journeyRoot, journeytoRoot, nameId, displayName);
+        String primaryCmd = commands.get(0);
+
+        if (waypoint == null) {
+            plugin.getLogger().warning(
+                    "[OverworldAgent][Journey] PublicWaypointManager.getWaypoint('"
+                            + nameId
+                            + "') returned null before dispatch for "
+                            + player.getName()
+                            + ". The id may not be in Journey's server-public scope even if it appears in listwaypoints.");
+        } else if (cfg.getBoolean("journey.debug-log", false)) {
+            plugin.getLogger().info(
+                    "[OverworldAgent][Journey] resolved waypoint nameId="
+                            + nameId
+                            + " label="
+                            + displayName
+                            + " waypointDomain="
+                            + waypointDomain
+                            + " playerDomain="
+                            + playerDomain
+                            + " playerWorld="
+                            + player.getWorld().getName());
+        }
+
         plugin.getLogger().info(
                 "[OverworldAgent][Journey] dispatch as player "
                         + player.getName()
                         + ": /"
-                        + cmd
+                        + primaryCmd
+                        + (commands.size() > 1 ? " (fallbacks: " + commands.subList(1, commands.size()) + ")" : "")
                         + " (nameId="
                         + nameId
                         + ", raw="
                         + rawDestination
-                        + ", journey-command-root=config:"
-                        + journeyRoot
+                        + ", dispatch-command="
+                        + cfg.getString("journey.dispatch-command", "auto")
                         + ")");
-        try {
-            if (!Bukkit.dispatchCommand(player, cmd)) {
-                plugin.getLogger().warning(
-                        "[OverworldAgent][Journey] Bukkit.dispatchCommand returned **false** for "
-                                + player.getName()
-                                + ". Command line: /"
-                                + cmd
-                                + ". Common causes: (1) player lacks permission for that Journey command or for `"
-                                + journeyRoot
-                                + "`, (2) wrong `journey.journey-command-root` (must match the label players use, e.g. journey vs jo), "
-                                + "(3) the command is not registered / Journey disabled. "
-                                + "If dispatch is true but navigation still fails, Journey may have run but rejected the waypoint id—check in-game Journey messages.");
-                Utils.msgNoPrefix(player, ChatColor.RED + "Journey did not run that command. Check permissions and the destination name.");
-            } else {
-                plugin.getLogger().info(
-                        "[OverworldAgent][Journey] dispatchCommand returned true for "
-                                + player.getName()
-                                + " (Journey should handle the rest; if nothing happens, verify waypoint `"
-                                + nameId
-                                + "` exists for server public scope).");
+        Runnable runDispatch = () -> {
+            Throwable lastError = null;
+            for (int attempt = 0; attempt < commands.size(); attempt++) {
+                String cmd = commands.get(attempt);
+                try {
+                    if (player.performCommand(cmd)) {
+                        plugin.getLogger().info(
+                                "[OverworldAgent][Journey] performCommand returned true for "
+                                        + player.getName()
+                                        + " (/"
+                                        + cmd
+                                        + "). If no trail appears, Journey rejected the destination or could not pathfind—check in-game Journey messages.");
+                        return;
+                    }
+                    plugin.getLogger().warning(
+                            "[OverworldAgent][Journey] performCommand returned false for "
+                                    + player.getName()
+                                    + " (/"
+                                    + cmd
+                                    + ")");
+                    lastError = null;
+                } catch (Throwable ex) {
+                    lastError = ex;
+                    String dupLabel = extractDuplicateKeyLabel(ex);
+                    if (dupLabel != null && attempt + 1 < commands.size()) {
+                        plugin.getLogger().warning(
+                                "[OverworldAgent][Journey] /"
+                                        + cmd
+                                        + " failed: duplicate Journey scope name \""
+                                        + dupLabel
+                                        + "\". Trying fallback /"
+                                        + commands.get(attempt + 1));
+                        continue;
+                    }
+                    plugin.getLogger().log(Level.WARNING, "Journey navigation failed for " + player.getName() + ": " + cmd, ex);
+                    if (dupLabel != null) {
+                        Utils.msgNoPrefix(player,
+                                ChatColor.RED + "Journey could not start navigation: duplicate destination name \""
+                                        + dupLabel
+                                        + "\" in Journey scopes. An admin should rename or remove the duplicate in journey_waypoints / NPC data.");
+                    } else {
+                        Utils.msgNoPrefix(player, ChatColor.RED + "Journey failed to start navigation. See the server log for details.");
+                    }
+                    return;
+                }
             }
-        } catch (Throwable ex) {
-            plugin.getLogger().log(Level.WARNING, "Journey navigation failed for " + player.getName() + ": " + cmd, ex);
-            if (throwableChainMessageContains(ex, "Duplicate key")) {
+            if (lastError == null) {
                 Utils.msgNoPrefix(player,
-                        ChatColor.RED + "Journey failed: duplicate destination keys in Journey scopes or data (see server log). "
-                                + "An administrator should dedupe `journey_waypoints` / NPC scopes.");
-            } else {
-                Utils.msgNoPrefix(player, ChatColor.RED + "Journey failed to start navigation. See the server log for details.");
+                        ChatColor.RED + "Journey did not run that command. Try /" + primaryCmd + " manually.");
             }
+        };
+        if (Bukkit.isPrimaryThread()) {
+            runDispatch.run();
+        } else {
+            Bukkit.getScheduler().runTask(plugin, runDispatch);
         }
+    }
+
+    private static List<String> buildJourneyDispatchCommands(FileConfiguration cfg, String journeyRoot, String journeytoRoot,
+            String nameId, String displayName) {
+        String mode = StringUtils.trimToEmpty(cfg.getString("journey.dispatch-command", "auto"));
+        if ("auto".equalsIgnoreCase(mode)) {
+            return List.of(journeyRoot + " server waypoint " + quoteIfNeeded(nameId));
+        }
+        String primary = switch (mode.toLowerCase(Locale.ROOT)) {
+            case "journeyto_plain" -> journeytoRoot + " " + quoteIfNeeded(nameId);
+            case "journeyto_scoped" -> journeytoRoot + " server:" + nameId;
+            case "server_waypoint_display" -> journeyRoot + " server waypoint "
+                    + quoteIfNeeded(StringUtils.isNotBlank(displayName) ? displayName : nameId);
+            default -> journeyRoot + " server waypoint " + quoteIfNeeded(nameId);
+        };
+        String fallback = journeyRoot + " server waypoint " + quoteIfNeeded(nameId);
+        if (primary.equals(fallback)) {
+            return List.of(primary);
+        }
+        return List.of(primary, fallback);
+    }
+
+    private static String extractDuplicateKeyLabel(Throwable ex) {
+        for (Throwable t = ex; t != null; t = t.getCause()) {
+            String m = t.getMessage();
+            if (m == null || !m.contains("Duplicate key")) {
+                continue;
+            }
+            int start = m.indexOf("Duplicate key ");
+            if (start < 0) {
+                return m;
+            }
+            start += "Duplicate key ".length();
+            int end = m.indexOf(" (", start);
+            return end > start ? m.substring(start, end) : m.substring(start);
+        }
+        return null;
     }
 
     private static boolean throwableChainMessageContains(Throwable ex, String fragment) {
@@ -162,13 +258,23 @@ public class Dialogue implements Listener {
         return false;
     }
 
-    private static final class JourneyWaypointChoice {
+    private static final class JourneyWaypointChoice implements JourneyLlmBridge.JourneyWaypointChoiceView {
         final String jtKey;
         final String label;
 
         JourneyWaypointChoice(String jtKey, String label) {
             this.jtKey = jtKey;
             this.label = (label != null && !label.isBlank()) ? label : jtKey;
+        }
+
+        @Override
+        public String jtKey() {
+            return jtKey;
+        }
+
+        @Override
+        public String label() {
+            return label;
         }
     }
 
@@ -374,12 +480,13 @@ public class Dialogue implements Listener {
     private static JourneyWaypointChoice choiceFromWaypointObject(Object waypoint, Object publicWaypointManager) {
         String label = extractWaypointName(waypoint);
         String key = extractWaypointJtKey(waypoint);
-        if (key == null || key.isBlank() || !nameIdMatchesWaypoint(publicWaypointManager, key, waypoint)) {
+        if (key == null || key.isBlank() || invokeGetWaypoint(publicWaypointManager, key) == null) {
             key = resolveNameIdForWaypoint(publicWaypointManager, waypoint, label);
         }
-        if (key != null && !key.isBlank()) {
-            key = key.toLowerCase(Locale.ROOT);
+        if (key == null || key.isBlank() || invokeGetWaypoint(publicWaypointManager, key) == null) {
+            return null;
         }
+        key = key.toLowerCase(Locale.ROOT);
         if (label == null || label.isBlank()) {
             label = key;
         }
@@ -399,16 +506,11 @@ public class Dialogue implements Listener {
             return fromRecord;
         }
         for (String candidate : buildNameIdCandidates(displayName)) {
-            if (nameIdMatchesWaypoint(publicWaypointManager, candidate, waypoint)) {
-                return candidate;
-            }
-        }
-        for (String candidate : buildNameIdCandidates(displayName)) {
             if (invokeGetWaypoint(publicWaypointManager, candidate) != null) {
                 return candidate;
             }
         }
-        return displayName == null ? null : displayName.toLowerCase(Locale.ROOT);
+        return null;
     }
 
     /** Journey SQL stores name_id separately from display name; it is not always exposed on {@code Waypoint}. */
@@ -449,7 +551,7 @@ public class Dialogue implements Listener {
             }
         }
         String trimmed = rawInput.trim();
-        if (trimmed.matches("(?i)(npc|poi)-[a-z0-9-]+")) {
+        if (trimmed.matches("(?i)(npc|poi)-[a-z0-9_-]+")) {
             return trimmed.toLowerCase(Locale.ROOT);
         }
         return trimmed.toLowerCase(Locale.ROOT);
@@ -581,45 +683,63 @@ public class Dialogue implements Listener {
             return List.of();
         }
         String trimmed = displayName.trim();
-        String lower = trimmed.toLowerCase(Locale.ROOT);
-        out.add(lower);
-        String fullSlug = lower.replaceAll("[^a-z0-9]", "");
+        String fullSlug = trimmed.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
         if (!fullSlug.isBlank()) {
-            out.add(fullSlug);
-            out.add("npc-" + fullSlug);
-            out.add("poi-" + fullSlug);
+            addSlugVariants(out, fullSlug);
         }
         String[] words = trimmed.split("\\s+");
         int start = 0;
         if (words.length > 1 && words[0].matches("(?i)(dr|mr|mrs|ms|prof)\\.?")) {
             start = 1;
         }
+        addWordJoinSlugs(out, words, start);
         if (start > 0) {
-            StringBuilder stripped = new StringBuilder();
-            for (int i = start; i < words.length; i++) {
-                stripped.append(words[i].toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", ""));
-            }
-            String slug = stripped.toString();
-            if (!slug.isBlank()) {
-                out.add(slug);
-                out.add("npc-" + slug);
-                out.add("poi-" + slug);
-            }
-            StringBuilder hyphenated = new StringBuilder();
-            for (int i = start; i < words.length; i++) {
-                if (hyphenated.length() > 0) {
-                    hyphenated.append('-');
-                }
-                hyphenated.append(words[i].toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", ""));
-            }
-            String hyphenSlug = hyphenated.toString();
-            if (!hyphenSlug.isBlank() && !hyphenSlug.equals(slug)) {
-                out.add(hyphenSlug);
-                out.add("npc-" + hyphenSlug);
-                out.add("poi-" + hyphenSlug);
-            }
+            addWordJoinSlugs(out, words, 0);
         }
         return new ArrayList<>(out);
+    }
+
+    private static void addSlugVariants(LinkedHashSet<String> out, String slug) {
+        if (slug == null || slug.isBlank()) {
+            return;
+        }
+        String s = slug.toLowerCase(Locale.ROOT);
+        out.add(s);
+        out.add("npc-" + s);
+        out.add("poi-" + s);
+    }
+
+    /** Builds concatenated, hyphen-, and underscore-joined slugs (e.g. {@code solar_panel_power}). */
+    private static void addWordJoinSlugs(LinkedHashSet<String> out, String[] words, int start) {
+        StringBuilder concat = new StringBuilder();
+        StringBuilder hyphen = new StringBuilder();
+        StringBuilder underscore = new StringBuilder();
+        for (int i = start; i < words.length; i++) {
+            String w = words[i].toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+            if (w.isBlank()) {
+                continue;
+            }
+            concat.append(w);
+            if (hyphen.length() > 0) {
+                hyphen.append('-');
+            }
+            hyphen.append(w);
+            if (underscore.length() > 0) {
+                underscore.append('_');
+            }
+            underscore.append(w);
+        }
+        addSlugVariants(out, concat.toString());
+        String hyphenSlug = hyphen.toString();
+        String underscoreSlug = underscore.toString();
+        if (!hyphenSlug.isBlank() && !hyphenSlug.contentEquals(concat)) {
+            addSlugVariants(out, hyphenSlug);
+        }
+        if (!underscoreSlug.isBlank()
+                && !underscoreSlug.contentEquals(concat)
+                && !underscoreSlug.contentEquals(hyphenSlug)) {
+            addSlugVariants(out, underscoreSlug);
+        }
     }
 
     private void openJourneyDestinationTextInput() {
@@ -727,7 +847,7 @@ public class Dialogue implements Listener {
                     }
                 }
                 JourneyWaypointChoice c = choiceFromWaypointObject(item, publicWaypointManager);
-                if (c.jtKey != null && !c.jtKey.isBlank()) {
+                if (c != null && c.jtKey != null && !c.jtKey.isBlank()) {
                     choices.add(c);
                 }
             }
@@ -856,9 +976,11 @@ public class Dialogue implements Listener {
                                 player,
                                 "&8" + BULLET + " &r" + wp.label,
                                 "&aClick here to select \"&r" + wp.label + "&a\"",
-                                l -> this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Guidance"), id -> {
+                                l -> {
                                     dispatchJourneyCommand(player, wp.jtKey);
-                                })
+                                    this.plugin.getQueryer().storeNewInteraction(
+                                            new Interaction(plugin, player, "Guidance"), id -> { });
+                                }
                         );
                     }
                     sendBackOption(this::doDialogue);
@@ -887,10 +1009,29 @@ public class Dialogue implements Listener {
                 "&f&nI want to see my scores");
         String agentEdit = cfg.getString("template-gui.text.agent-edit",
                 "&f&nI want to edit my agent");
-        // Agent Guidance Option
-        // NOTE: Journey 1.3.x may throw when opening its GUI via plain `/jt` on some servers.
-        // We avoid that by enumerating public waypoints (if available) and dispatching `jt <waypoint>`
-        // which does not require opening the GUI.
+
+        // Discussion first (free text → PMML / LLM via chat)
+        if (text) {
+            sendComponent(
+                    player,
+                    "&8" + BULLET + customResponse,
+                    "&aClick here, then type your message in chat",
+                    p -> openFreeDiscussionChatInput()
+            );
+        } else {
+            sendComponent(
+                    player,
+                    "&8" + BULLET + endResponse,
+                    "&aClick here to see my response!",
+                    p -> {
+                        player.sendMessage(response);
+                        doResponse();
+                    });
+        }
+
+        // Agent Guidance Option (async — remaining menu items are sent after this completes)
+        Runnable sendMenuTail = () -> sendDialogueMenuTail(cfg, scoreResponse, agentEdit);
+
         if (Bukkit.getPluginManager().getPlugin("Journey") != null) {
             loadGuidanceDestinations(player, guidanceChoices -> {
                 if (!guidanceChoices.isEmpty()) {
@@ -903,8 +1044,14 @@ public class Dialogue implements Listener {
                             p -> openJourneyDestinationTextInput()
                     );
                 }
+                sendMenuTail.run();
             });
+        } else {
+            sendMenuTail.run();
         }
+    }
+
+    private void sendDialogueMenuTail(FileConfiguration cfg, String scoreResponse, String agentEdit) {
         //Agent Score option
         sendComponent(
                 player,
@@ -928,50 +1075,6 @@ public class Dialogue implements Listener {
                 p -> openBuilderMenu()
         );
 
-        //Agent Dialogue option (free text → PMML / future LLM via chat, not sign)
-        if (text) {
-            sendComponent(
-                    player,
-                    "&8" + BULLET + customResponse,
-                    "&aClick here, then type your message in chat",
-                    p -> openFreeDiscussionChatInput()
-            );
-        } else {
-            sendComponent(
-                    player,
-                    "&8" + BULLET + endResponse,
-                    "&aClick here to see my response!",
-                    p -> {
-                        player.sendMessage(response);
-                        doResponse();
-                    });
-        }
-/*
-        //Agent Reflection Option (disabled)
-        sendComponent(
-                player,
-                "&8" + BULLET + seeDialogue,
-                "&aClick here to see our conversation so far!",
-                p -> {
-                    plugin.getQueryer().getSessionConversation(player, plugin.getPlayerSessions().get(player), conversation -> {
-                        HashMap<String, List<String>> dialogue = (HashMap<String, List<String>>) conversation;
-                        for (Map.Entry<String, List<String>> entry : dialogue.entrySet()) {
-                            String world = entry.getKey();
-                            List<String> discussion = entry.getValue();
-                            for (int k = 0; k < discussion.size(); k++) {
-                                if (k % 2 == 0) {
-                                    player.sendMessage(world + ": " + player.getName() + ": " + discussion.get(k));
-                                } else {
-                                    player.sendMessage(world + ": " + plugin.getAgents().get(player.getName()).getName() + ": " + discussion.get(k));
-                                }
-                            }
-                        }
-                    });
-                    this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Reflection"), id -> {
-
-                    });
-                });
-*/
         Map<String, Integer> edits = plugin.getAgentEdits().get(player);
         int skinChange = edits.get("Skin");
         int nameChange = edits.get("Name");
@@ -981,7 +1084,7 @@ public class Dialogue implements Listener {
             sendComponent(player, "&8" + BULLET + agentEdit, "&aClick here to change me!", p -> openEditMenu());
         }
 
-        //Close option so every menu has a way out
+        //Close option — always last
         sendComponent(
                 player,
                 "&8" + BULLET + " &7&nThat's all for now",
@@ -1267,24 +1370,53 @@ public class Dialogue implements Listener {
                 && plugin.getLlmProvider() != null
                 && plugin.getLlmProvider().isConfigured()) {
             plugin.getLogger().fine("[OverworldAgent][Journey] LLM path started");
-            String systemPrompt = plugin.augmentLlmSystemPrompt(plugin.getConfig().getString("llm.system-prompt",
-                    "You are a friendly in-game science education assistant. "
-                            + "Answer clearly and briefly; keep content appropriate for students."));
-            Chatbot llmChatbot = new Chatbot(buildLlmMessageWithHistory(finalResponse));
-            CompletableFuture.supplyAsync(() -> {
-                try {
-                    return llmChatbot.generateLlmReply(plugin.getLlmProvider(), systemPrompt);
-                } catch (Exception ex) {
-                    plugin.getLogger().warning("LLM reply failed: " + ex.getMessage());
-                    return null;
+            boolean journeyActions = plugin.getConfig().getBoolean("llm.journey-actions.enabled", true)
+                    && Bukkit.getPluginManager().getPlugin("Journey") != null;
+
+            java.util.function.Consumer<List<JourneyWaypointChoice>> startLlm = guidanceChoices -> {
+                List<JourneyGuidanceCatalog.Destination> destinations =
+                        JourneyLlmBridge.fromWaypointChoices(guidanceChoices);
+                String systemPrompt = plugin.buildLlmSystemPrompt(player);
+                if (journeyActions && !destinations.isEmpty()) {
+                    int max = plugin.getConfig().getInt("llm.journey-actions.max-destinations", 60);
+                    systemPrompt = JourneyLlmBridge.appendDestinationContext(systemPrompt, destinations, max);
                 }
-            }).thenAccept(llmText -> Bukkit.getScheduler().runTask(plugin, () -> {
-                if (llmText != null && !llmText.isBlank()) {
-                    feedbackOut[0] = llmText;
-                }
-                recordDiscussionTurn(finalResponse, feedbackOut[0]);
-                storeAndSend.run();
-            }));
+                final String llmSystemPrompt = systemPrompt;
+                Chatbot llmChatbot = new Chatbot(buildLlmMessageWithHistory(finalResponse));
+                CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return llmChatbot.generateLlmReply(plugin.getLlmProvider(), llmSystemPrompt);
+                    } catch (Exception ex) {
+                        plugin.getLogger().warning("LLM reply failed: " + ex.getMessage());
+                        return null;
+                    }
+                }).thenAccept(llmText -> Bukkit.getScheduler().runTask(plugin, () -> {
+                    if (llmText != null && !llmText.isBlank()) {
+                        JourneyLlmBridge.ParsedReply parsed = JourneyLlmBridge.parseLlmReply(llmText);
+                        feedbackOut[0] = parsed.displayText().isBlank() ? llmText : parsed.displayText();
+                        String journeyTarget = parsed.journeyNameId();
+                        if (journeyTarget == null && journeyActions) {
+                            journeyTarget = JourneyLlmBridge.matchDestination(finalResponse, destinations).orElse(null);
+                        }
+                        if (journeyTarget != null && journeyActions) {
+                            plugin.getLogger().info(
+                                    "[OverworldAgent][Journey] LLM-triggered navigation for "
+                                            + player.getName()
+                                            + ": "
+                                            + journeyTarget);
+                            dispatchJourneyCommand(player, journeyTarget);
+                        }
+                    }
+                    recordDiscussionTurn(finalResponse, feedbackOut[0]);
+                    storeAndSend.run();
+                }));
+            };
+
+            if (journeyActions) {
+                loadGuidanceDestinations(player, startLlm);
+            } else {
+                startLlm.accept(List.of());
+            }
         } else {
             recordDiscussionTurn(finalResponse, feedbackOut[0]);
             storeAndSend.run();

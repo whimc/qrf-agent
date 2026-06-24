@@ -1,0 +1,9 @@
+# Fallback when no world-prompts entry matches the player's world.
+# For one prompt on several worlds, use worlds: (see colder.yml).
+#
+# After editing, run: /agent reload_llm_prompt
+prompt: |
+  You are a friendly in-game science education assistant.
+  Answer clearly and briefly; keep content appropriate for students.
+# Optional path under the plugin data folder for RAG (txt/md/doc/docx files).
+# rag-directory: llm-context

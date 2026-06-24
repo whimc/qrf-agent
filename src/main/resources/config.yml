@@ -7,6 +7,10 @@ mysql:
 # Guidance uses Journey public waypoints: command root must match Journey's primary label (default "journey"; alias "jo" if you use that).
 journey:
   journey-command-root: journey
+  # Alias for /journeyto (default jt). Used when dispatch-command is journeyto_* or auto for npc-/poi- waypoints.
+  journeyto-command-root: jt
+  # auto = /journey server waypoint <name_id> (avoids /jt scope merge). Do NOT use journeyto_* if Journey logs Duplicate key.
+  dispatch-command: auto
   # When true, logs Journey domain / public waypoint counts when opening the guidance menu (console).
   debug-log: false
   # Optional override for portal-linked world clusters (e.g. Colder). When unset, auto-detects from CamelCase names.
@@ -53,7 +57,10 @@ llm:
   base-url: ""
   request-timeout-seconds: 60
   system-prompt: "You are a friendly in-game science education assistant. Answer clearly and briefly; keep content appropriate for students."
-  # Folder under the plugin data directory for RAG source files (txt/md). Safe to add lore, scripts, glossaries.
+  # Per-world prompts: world-prompts/*.yml (worlds: list or <WorldName>.yml) — /agent reload_llm_prompt
+  # When true, logs system-prompt size and RAG file counts to console on each LLM call.
+  debug-log: false
+  # Folder under the plugin data directory for global RAG (txt/md/doc/docx) when llm.rag.enabled is true.
   context-directory: llm-context
   rag:
     enabled: false
@@ -63,10 +70,17 @@ llm:
     include-extensions:
       - txt
       - md
+      - doc
+      - docx
   npc-context:
     enabled: true
     radius: 25.0
     max-items: 3
+  # When Journey is installed, append destinations to the LLM system prompt and run navigation
+  # when the model emits JOURNEY:<name_id> or the player message matches a known destination.
+  journey-actions:
+    enabled: true
+    max-destinations: 60
 prompts:
   - label: 0
     prompt: agent

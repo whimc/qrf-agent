@@ -7,11 +7,9 @@ main: edu.whimc.overworld_agent.OverworldAgent
 softdepend: [Citizens,ProtocolLib,WHIMC-ScienceTools,Journey,SpeechReceiver,HolographicDisplays,CoreProtect,WHIMC-StudentFeedback]
 commands:
   agent:
-    description: agent command for dialogue
-    usage: '/agent'
-  agents:
-    description: Root agent admin command
-    usage: '/agents'
+    description: Agent dialogue and admin commands
+    usage: '/agent [subcommand]'
+    aliases: [agents]
   oacallback:
     description: Internal callback command for chat UI
     usage: '/oacallback <uuid>'

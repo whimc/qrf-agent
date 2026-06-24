@@ -10,12 +10,15 @@ import edu.whimc.overworld_agent.dialoguetemplate.SpigotCallback;
 import edu.whimc.overworld_agent.dialoguetemplate.SignMenuFactory;
 import edu.whimc.overworld_agent.dialoguetemplate.models.LlmProvider;
 import edu.whimc.overworld_agent.dialoguetemplate.models.NoOpLlmProvider;
+import edu.whimc.overworld_agent.dialoguetemplate.models.llm.LlmConfigAnnouncer;
 import edu.whimc.overworld_agent.dialoguetemplate.models.llm.LlmProviderFactory;
 import edu.whimc.overworld_agent.dialoguetemplate.models.llm.LlmRagContextBuilder;
+import edu.whimc.overworld_agent.dialoguetemplate.models.llm.WorldLlmPromptRegistry;
 import edu.whimc.overworld_agent.dialoguetemplate.models.BuildTemplate;
 import edu.whimc.overworld_agent.utils.sql.Queryer;
 
 import org.bukkit.Bukkit;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.player.PlayerJoinEvent;
@@ -58,6 +61,7 @@ public class OverworldAgent extends JavaPlugin {
     /** Single instance; {@link edu.whimc.overworld_agent.dialoguetemplate.Dialogue} registers clicks here (see /oacallback). */
     private SpigotCallback spigotCallback;
     private LlmProvider llmProvider = new NoOpLlmProvider();
+    private final WorldLlmPromptRegistry worldLlmPromptRegistry = new WorldLlmPromptRegistry();
     private ExpertSpawnCommand expertSpawnCommand;
     private HashMap<Player,Long> sessions;
     //private SpeechReceiver receiver;
@@ -109,15 +113,11 @@ public class OverworldAgent extends JavaPlugin {
         net.citizensnpcs.api.CitizensAPI.getTraitFactory().registerTrait(net.citizensnpcs.api.trait.TraitInfo.create(AgentPermanentFlyingTrait.class).withName("agentpermanentflying"));
         net.citizensnpcs.api.CitizensAPI.getTraitFactory().registerTrait(net.citizensnpcs.api.trait.TraitInfo.create(AgentFollowCatchUpTrait.class).withName("agentfollowcatchup"));
 
-        expertSpawnCommand = new ExpertSpawnCommand(this, "agents", "spawn");
+        expertSpawnCommand = new ExpertSpawnCommand(this, "agent", "spawn");
 
         AgentCommand agentCommand = new AgentCommand(this);
         getCommand("agent").setExecutor(agentCommand);
         getCommand("agent").setTabCompleter(agentCommand);
-
-        AgentsCommand agentsCommand = new AgentsCommand(this);
-        getCommand("agents").setExecutor(agentsCommand);
-        getCommand("agents").setTabCompleter(agentsCommand);
 
         HabitatAssessCommand assessCommand = new HabitatAssessCommand(this);
         getCommand("assess-habitat").setExecutor(assessCommand);
@@ -133,10 +133,14 @@ public class OverworldAgent extends JavaPlugin {
         chatTextInputFactory = new ChatTextInputFactory(this);
         try {
             Files.createDirectories(LlmRagContextBuilder.resolveContextRoot(this));
+            saveResource(WorldLlmPromptRegistry.PROMPTS_FOLDER + "/" + WorldLlmPromptRegistry.DEFAULT_FILE, false);
+            saveResource(WorldLlmPromptRegistry.PROMPTS_FOLDER + "/colder.yml", false);
+            worldLlmPromptRegistry.reload(this);
         } catch (IOException e) {
-            getLogger().log(Level.FINE, "LLM context directory not created yet: " + e.getMessage());
+            getLogger().log(Level.WARNING, "Could not initialize world LLM prompts: " + e.getMessage());
         }
         setupLlmFromConfig();
+        LlmConfigAnnouncer.announce(this);
         getServer().getPluginManager().registerEvents(new Listeners(this), this);
     }
 
@@ -165,6 +169,26 @@ public class OverworldAgent extends JavaPlugin {
         return LlmRagContextBuilder.appendIfEnabled(this, baseSystemPrompt);
     }
 
+    public WorldLlmPromptRegistry getWorldLlmPromptRegistry() {
+        return worldLlmPromptRegistry;
+    }
+
+    /**
+     * Resolves the LLM system prompt for a world (per-world YAML, then default.yml, then config.yml).
+     */
+    public String buildLlmSystemPrompt(World world) {
+        if (world == null) {
+            return worldLlmPromptRegistry.buildSystemPrompt(this, null);
+        }
+        return worldLlmPromptRegistry.buildSystemPrompt(this, world.getName());
+    }
+
+    public String buildLlmSystemPrompt(Player player) {
+        if (player == null) {
+            return buildLlmSystemPrompt((World) null);
+        }
+        return buildLlmSystemPrompt(player.getWorld());
+    }
 
     /**
      * Method when server is stopped
@@ -253,18 +277,19 @@ public class OverworldAgent extends JavaPlugin {
         try {
             Class<?> cl = Class.forName("edu.whimc.feedback.StudentFeedback");
             Method getInstance = cl.getMethod("getInstance");
-            Object plugin = getInstance.invoke(null);
-            if (plugin == null) {
+            Object feedback = getInstance.invoke(null);
+            if (feedback == null) {
                 return;
             }
             Method getSessions = cl.getMethod("getPlayerSessions");
-            Object sessions = getSessions.invoke(plugin);
+            Object sessions = getSessions.invoke(feedback);
             if (sessions instanceof Map<?, ?> map) {
                 @SuppressWarnings("unchecked")
-                Map<Player, Object> typed = (Map<Player, Object>) map;
+                Map<Player, Long> typed = (Map<Player, Long>) map;
                 typed.putIfAbsent(player, System.currentTimeMillis());
             }
-        } catch (Throwable ignored) {
+        } catch (Throwable ex) {
+            getLogger().fine("Could not ensure StudentFeedback session for " + player.getName() + ": " + ex.getMessage());
         }
     }
 

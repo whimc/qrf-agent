@@ -4,17 +4,17 @@ QRF-Agent is a Minecraft plugin to create and define agent behavior (forked from
 To select the agent right click on the desired agent and to start a conversation with your agent also right click on them. 
 To select a dialogue option must click enter then left click on the desired option.
 
-Alternatively you can spawn a guide agent with **`/agents spawn`** or **`/agent spawn`** (same implementation; permission is always **`whimc-agent.agents.spawn`** because the handler is registered under the `agents` permission namespace).
+Alternatively you can spawn a guide agent with **`/agent spawn`** (`/agents` is an alias).
 
 **Spawn syntax**
 
-- **Player agent:** `/agents spawn player <skin> <nameâ€¦>` â€” first tab-completion token is `player`, second is a skin key from `skins.<agent_type>` in `config.yml`, then the display name (spaces allowed in the name).
-- **Animal agent:** `/agents spawn <animal> <nameâ€¦>` â€” `<animal>` is one of the **fixed** mob IDs allowed by `AgentEntityTypes` (see that class / tab-complete: e.g. `axolotl`, `ocelot`, `turtle`, `sheep`, `pig`, `strider`, `sniffer`, `nautilus`, `happy_ghast`, `bee`, `parrot`; types not present on your game version are omitted at runtime). No skin argument.
-- **Legacy:** `/agents spawn <skin> <nameâ€¦>` â€” if the first token is not a valid entity type, it is treated as a **player** skin key (same as omitting `player`).
+- **Player agent:** `/agent spawn player <skin> <name…>` — first tab-completion token is `player`, second is a skin key from `skins.<agent_type>` in `config.yml`, then the display name (spaces allowed in the name).
+- **Animal agent:** `/agent spawn <animal> <name…>` — `<animal>` is one of the **fixed** mob IDs allowed by `AgentEntityTypes` (see that class / tab-complete: e.g. `axolotl`, `ocelot`, `turtle`, `sheep`, `pig`, `strider`, `sniffer`, `nautilus`, `happy_ghast`, `bee`, `parrot`; types not present on your game version are omitted at runtime). No skin argument.
+- **Legacy:** `/agent spawn <skin> <name…>` — if the first token is not a valid entity type, it is treated as a **player** skin key (same as omitting `player`).
 
 Tab-complete the first argument to see every allowed value on your server version.
 
-Builder functions (build templates, demo builds, base feedback) no longer require a separate mode: they live in **every agent's dialogue menu** under **"I want to build something!"**. A dedicated builder NPC can still be spawned with **`/agents rebuilderspawn`** and interacted with like a guide agent.
+Builder functions (build templates, demo builds, base feedback) no longer require a separate mode: they live in **every agent's dialogue menu** under **"I want to build something!"**. A dedicated builder NPC can still be spawned with **`/agent rebuilderspawn`** and interacted with like a guide agent.
 
 _**Requires Java 21+**_
 
@@ -101,9 +101,53 @@ RAG (retrieval-augmented generation) here means: **optional** inclusion of plain
 | `llm.rag.enabled` | When `true`, scans that directory and appends bounded excerpts to the system prompt before each completion. |
 | `llm.rag.max-total-chars` / `max-file-chars` | Cap total and per-file bytes so prompts stay reasonable. |
 | `llm.rag.max-directory-depth` | How deep to walk subfolders. |
-| `llm.rag.include-extensions` | File extensions to read (default `txt`, `md`). |
+| `llm.rag.include-extensions` | File extensions to read (default `txt`, `md`, `doc`, `docx`). Word files are converted to plain text via Apache POI. |
 
-Put glossaries, world lore, or lesson snippets as `.md`/`.txt` files there. This is **not** a vector database or hybrid searchâ€”only a simple file concat for small corpora; you can replace the flow later with a custom `LlmProvider` that does real retrieval.
+Put glossaries, world lore, or lesson snippets as `.md`, `.txt`, `.doc`, or `.docx` files there. This is **not** a vector database or hybrid search—only a simple file concat for small corpora; you can replace the flow later with a custom `LlmProvider` that does real retrieval.
+
+#### Per-world prompts (`world-prompts/`)
+
+Long or world-specific system prompts live in **`plugins/WHIMC-QRF-Agent/world-prompts/*.yml`** instead of the main `config.yml`. Each file can set:
+
+| Key | Description |
+|-----|-------------|
+| `world` | Single Bukkit world name this prompt applies to. |
+| `worlds` | List of world names sharing one prompt (e.g. `ColderStrip`, `ColderHot`, `ColderCold`). |
+| `prompt` | Multi-line system prompt text for those worlds. |
+| `rag-directory` | Optional folder under the plugin data directory for world-specific RAG (overrides global `llm.context-directory` for that world). |
+
+If no file matches the player's world, **`world-prompts/default.yml`** is used; if that is missing, the plugin falls back to **`llm.system-prompt`** in `config.yml`.
+
+**Per-world `rag-directory`** (in a world-prompt YAML) is appended whenever that world’s prompt is built — it does **not** require `llm.rag.enabled: true` in the main config. Global `llm.rag` only applies to the fallback `llm.system-prompt` path.
+
+Reload without restart: **`/agent reload_llm_prompt`** (optional world name). In-game output shows prompt size; **`(RAG appended)`** means files from `rag-directory` were included. For a per-file list, check the server console **`[OverworldAgent][LLM]`** block on startup/reload (or set `llm.debug-log: true`).
+
+On **startup** and after **`reload_llm_prompt`**, the console logs an **`[OverworldAgent][LLM]`** summary: provider, model, `use-for-reply`, global RAG directory and document list, each loaded world-prompt file with bound worlds, and per-world RAG directories with their document filenames.
+
+#### LLM Journey actions (`llm.journey-actions`)
+
+When **Journey** is installed and the player uses **free discussion** with `llm.use-for-reply: true`, the plugin can start navigation from chat:
+
+| Key | Description |
+|-----|-------------|
+| `llm.journey-actions.enabled` | When `true`, appends the Journey destination catalog to the system prompt and may run `/journey server waypoint …` after the LLM reply. |
+| `llm.journey-actions.max-destinations` | Max destinations listed in the prompt (default `60`). |
+
+The model may end its reply with a line `JOURNEY:<name_id>` (stripped before the player sees it). The plugin also fuzzy-matches the player’s message against known `name_id` / labels.
+
+#### Journey guidance dispatch (`journey.*`)
+
+Guidance menu clicks and PMML **guidance** intents dispatch navigation as the player. Prefer **`dispatch-command: auto`** (default): runs **`/journey server waypoint <name_id>`**, which avoids `/jt` merging all Journey scopes.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `journey.journey-command-root` | `journey` | Root for `/journey server waypoint …` |
+| `journey.journeyto-command-root` | `jt` | Root for `/jt` / journeyto (used only if you set `dispatch-command` to `journeyto_*`) |
+| `journey.dispatch-command` | `auto` | `auto` → `server waypoint`; also `server_waypoint`, `journeyto_scoped`, `journeyto_plain`, `server_waypoint_display` |
+
+**Do not use `journeyto_*` on servers where Journey throws `Duplicate key …` when merging scopes** (e.g. two destinations with the same display name like “Mission Control”). Fix duplicate names in `journey_waypoints` / NPC data, or stay on `auto` / `server_waypoint`.
+
+Other Journey keys: `debug-log`, `linked-world-prefix`, `include-poi-regions`, `poi-source`, etc. — see [`config.yml`](src/main/resources/config.yml).
 
 #### Nearby NPC context (`llm.npc-context`)
 
@@ -241,36 +285,32 @@ Then in-game: `/agent chat test` â†’ type messages in chat â†’ `/agent
 ---
 ## Commands
 
-Permissions follow **`whimc-agent.<base>.<subcommand>`** (each `/agents â€¦` subcommand registers its own node). The shared **guide spawn** handler is registered as **`whimc-agent.agents.spawn`** even when invoked as **`/agent spawn`**.
+Permissions follow **`whimc-agent.<base>.<subcommand>`** (each subcommand registers its own node under the unified **`agent`** command).
 
-### Root commands (`plugin.yml`)
+### `/agent` (alias: `/agents`)
 
-| Command | Typical use                                                                                      |
-|---------|--------------------------------------------------------------------------------------------------|
-| **`/agents`** | Admin / spawn / builder â€” requires a subcommand (see below).                                     |
-| **`/agent`** | Player **`chat`** or **`spawn`** (same spawn behavior as `/agents spawn`).                       |
-| **`/assess-habitat`** | Habitat assessment command. Only works with ML-API and routing pythong script on server running. |
-| **`/oacallback`** | **Internal** â€” clickable chat UI callbacks; not for players to run manually.                     |
-
-### `/agents` subcommands (current code)
+Running **`/agent`** with no arguments opens the **disembodied dialogue menu** (same as **`/agent chat`**). Subcommands:
 
 | Subcommand | Permission node | Description |
 |------------|-----------------|-------------|
-| **`spawn`** | `whimc-agent.agents.spawn` | Spawn or replace your **guide** agent (`player` + skin + name, or `Animals` mob type + name). |
-| **`despawn`** | `whimc-agent.agents.despawn` | Despawn agent(s) for a player or **`all`**. |
-| **`destroy`** | `whimc-agent.agents.destroy` | Destroy agent NPC(s) for a player or **`all`**. |
-| **`reactivate`** | `whimc-agent.agents.reactivate` | Respawn agent(s) for a player or **`all`**. |
-| **`rebuilderspawn`** | `whimc-agent.agents.rebuilderspawn` | Spawn a **builder** NPC (player model, fixed â€œBuilderâ€ setup) at your location. |
-| **`skin_type`** | `whimc-agent.agents.skin_type` | Set global skin pack: argument must be a **top-level key** under `skins:` in `config.yml` (bundled: **`scientist_casual`**, **`scientist_stereotype`**). |
+| **`chat`** | `whimc-agent.agent.chat` | Dialogue menu, or **`chat test`** / **`chat end`** for interactive LLM chat (see above). |
+| **`spawn`** | `whimc-agent.agent.spawn` | Spawn or replace your **guide** agent (`player` + skin + name, or mob type + name). |
+| **`despawn`** | `whimc-agent.agent.despawn` | Despawn agent(s) for a player or **`all`**. |
+| **`destroy`** | `whimc-agent.agent.destroy` | Destroy agent NPC(s) for a player or **`all`**. |
+| **`reactivate`** | `whimc-agent.agent.reactivate` | Respawn agent(s) for a player or **`all`**. |
+| **`rebuilderspawn`** | `whimc-agent.agent.rebuilderspawn` | Spawn a **builder** NPC at your location. |
+| **`skin_type`** | `whimc-agent.agent.skin_type` | Set global skin pack (`scientist_casual`, `scientist_stereotype`, etc.). |
+| **`about`** | `whimc-agent.agent.about` | List subcommands and permissions. |
+| **`reload_llm_prompt`** | `whimc-agent.agent.reload_llm_prompt` | Reload `world-prompts/` from disk; re-logs LLM config to console. |
 
-*(The old `chat_type` subcommand was removed: guide and builder menus are merged into one â€” builder options live under "I want to build something!".)*
+*(The old separate `/agents` root command was merged into `/agent`. Permission nodes changed from `whimc-agent.agents.*` to `whimc-agent.agent.*` — update LuckPerms or similar grants.)*
 
-### `/agent` subcommands
+### Other commands (`plugin.yml`)
 
-| Subcommand | Permission node | Description |
-|------------|-----------------|-------------|
-| **`chat`** | `whimc-agent.agent.chat` | Disembodied dialogue menu (guide + builder options merged), or **`chat test`** / **`chat end`** for interactive LLM chat (see above). |
-| **`spawn`** | `whimc-agent.agents.spawn` | Same as **`/agents spawn`** (uses the shared `ExpertSpawnCommand`). |
+| Command | Typical use |
+|---------|---------------|
+| **`/assess-habitat`** | Habitat assessment (requires ML-API and routing script on server). |
+| **`/oacallback`** | **Internal** — clickable chat UI callbacks; not for players. |
 
 ### Guide agent entity types (reference)
 
@@ -279,13 +319,13 @@ The spawn command accepts:
 1. **`player`** â€” then a **skin key** under `skins.<agent_type>` (see `agent_type` in `config.yml`, usually **`scientist_casual`** or **`scientist_stereotype`**).
 2. Any other token that is in the **configured whitelist** in `AgentEntityTypes` (`player` + fixed mob enum names). Other `EntityType` IDs are rejected even if they are valid mobs on the server.
 
-Use **tab completion** on the first argument of `/agents spawn` / `/agent spawn` for the list (`player` plus allowed mobs in whitelist order). On older servers, mobs whose `EntityType` constant does not exist yet (e.g. `HAPPY_GHAST`) are skipped automatically.
+Use **tab completion** on the first argument of `/agent spawn` for the list (`player` plus allowed mobs in whitelist order). On older servers, mobs whose `EntityType` constant does not exist yet (e.g. `HAPPY_GHAST`) are skipped automatically.
 
 **In-game entity type change:** embodied players can switch the agent between **`player`** and the same allowed mob list (`AgentEntityTypes.selectableAgentTypes()`).
 
 ### Skin keys (under each `skins` section)
 
-Use these as **`<skin>`** after **`player`**; names are **lowercase** and must match `config.yml`. They are grouped under **`scientist_casual`** and **`scientist_stereotype`** (switch pack with **`/agents skin_type <pack>`**).
+Use these as **`<skin>`** after **`player`**; names are **lowercase** and must match `config.yml`. They are grouped under **`scientist_casual`** and **`scientist_stereotype`** (switch pack with **`/agent skin_type <pack>`**).
 
 | Skin key | Typical label |
 |----------|----------------|
@@ -300,16 +340,19 @@ Use these as **`<skin>`** after **`player`**; names are **lowercase** and must m
 | `hfscientist` | Hispanic female scientist |
 
 ## Player dialogue options
+
+The main menu lists **free discussion first** ("I want to discuss something"), then guidance, scores, build, edit, and close.
+
 ### Guide
 | Dialogue option | Description |
 |-----------------|-------------|
+| Free discussion | **First option** in the menu. **Ongoing AI chat mode**: clicking toggles chat mode on and every chat message is routed to the agent through **`doResponse()`** (PMML intent by default; **`llm.use-for-reply`** when an `LlmProvider` is configured, with short-term conversation history). Type **`stop`** or **`exit`** in chat to end the session. |
 | Guidance ("something cool") | If **Journey** is present: shows a **random subset** (3–5 when available) of **server public** waypoints and **`poi-*` regions** from **portal-linked worlds** (same name prefix, e.g. `ColderCold` / `ColderHot` / `ColderStrip` share `Colder`; override with `journey.linked-world-prefix`). POI regions come from WorldGuard and/or `rg_region` in MySQL (`journey.poi-source`: `worldguard`, `database`, or `both`). Each choice runs **`/<journey-command-root> server waypoint <name_id>`** as the player. Set **`journey.debug-log: true`** for linked-world and source counts in console. Falls back to all public waypoints, then **chat** entry, if nothing matches. |
-| Free discussion | **Ongoing AI chat mode**: clicking the option toggles chat mode on (the player is notified) and every chat message they send is routed to the agent through **`doResponse()`** (PMML intent today; **`llm.use-for-reply`** when an `LlmProvider` is registered, with short-term conversation history). Type **`stop`** or **`exit`** in chat to end the session. |
 | Scores | Runs **`/progress`** (e.g. **WHIMC-StudentFeedback**); session is ensured when possible. |
-| Build ("I want to build something!") | Opens the **builder menu** (templates, demo builds, base feedback â€” see Builder table below); no mode switch needed. |
+| Build ("I want to build something!") | Opens the **builder menu** (templates, demo builds, base feedback — see Builder table below); no mode switch needed. |
 | Edit | **Embodied** agents only: change **name**, **entity type** (`player` vs Animals list), and **skin** when the NPC is a **player** model (up to configured edit limits). |
 
-Every menu and submenu ends with a **Go back** entry (or "That's all for now" at the top level) so players can always navigate backwards. *(Planet tagging was removed from the plugin.)*
+Every menu and submenu ends with a **Go back** entry; the top-level menu ends with **"That's all for now"** as the last option.
 
 ### Builder ("I want to build something!")
 
