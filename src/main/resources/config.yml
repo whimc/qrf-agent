@@ -7,10 +7,28 @@ mysql:
 # Guidance uses Journey public waypoints: command root must match Journey's primary label (default "journey"; alias "jo" if you use that).
 journey:
   journey-command-root: journey
+  # Alias for /journeyto (default jt). Used when dispatch-command is journeyto_* or auto for npc-/poi- waypoints.
+  journeyto-command-root: jt
+  # auto = /journey server waypoint <name_id> (avoids /jt scope merge). Do NOT use journeyto_* if Journey logs Duplicate key.
+  dispatch-command: auto
   # When true, logs Journey domain / public waypoint counts when opening the guidance menu (console).
   debug-log: false
-expiration-days: 7
+  # Optional override for portal-linked world clusters (e.g. Colder). When unset, auto-detects from CamelCase names.
+  linked-world-prefix: ""
+  # Minimum number of worlds sharing a prefix before treating them as linked (auto-detect only).
+  linked-world-min-siblings: 2
+  # Include WorldGuard / DB regions whose id starts with poi- (also used as Journey name_id when registered).
+  include-poi-regions: true
+  poi-region-prefix: "poi-"
+  # worldguard = in-memory regions; database = rg_region SQL; both = merge (recommended).
+  poi-source: both
+  # Table prefix for WorldGuard MySQL storage (rg_region, rg_world).
+  worldguard-table-prefix: rg_
 agent_type: scientist_casual
+
+# Player spawn: /agent spawn player --url <https://direct-png-link> <name> (uses Citizens/Mineskin, like /npc skin --url)
+agent-spawn:
+  allow-url-skins: true
 # Blocks above ground for non-player agent mobs (no gravity + height lock). Player-shaped agents ignore this. Use 0 to disable vertical tracking (only no-gravity).
 agent-non-player-hover-height: 2.0
 # Multiplier applied to Citizens navigator speed for non-player agents (1.0 = default mob follow speed). Higher = faster when hovering/following.
@@ -23,6 +41,10 @@ agent-player-follow-margin: 2.5
 agent-player-nav-destination-teleport-margin: -1
 # Ticks the NPC can stand still before navigation is cancelled as STUCK; higher avoids premature cancel on slow paths.
 agent-player-nav-stationary-ticks: 1200
+# When horizontal distance to the owner exceeds this, the agent catch-up teleports beside them (not on top).
+agent-follow-catch-up-distance: 16.0
+# Blocks to the side of the player when catch-up teleporting.
+agent-follow-catch-up-offset: 1.5
 # Mob agents (hovering): tighter path range and margin so they keep up while floating.
 agent-mob-follow-path-range: 5
 agent-mob-follow-margin: 1.25
@@ -39,7 +61,10 @@ llm:
   base-url: ""
   request-timeout-seconds: 60
   system-prompt: "You are a friendly in-game science education assistant. Answer clearly and briefly; keep content appropriate for students."
-  # Folder under the plugin data directory for RAG source files (txt/md). Safe to add lore, scripts, glossaries.
+  # Per-world prompts: world-prompts/*.yml (worlds: list or <WorldName>.yml) — /agent reload_llm_prompt
+  # When true, logs system-prompt size and RAG file counts to console on each LLM call.
+  debug-log: false
+  # Folder under the plugin data directory for global RAG (txt/md/doc/docx) when llm.rag.enabled is true.
   context-directory: llm-context
   rag:
     enabled: false
@@ -49,21 +74,17 @@ llm:
     include-extensions:
       - txt
       - md
+      - doc
+      - docx
   npc-context:
     enabled: true
     radius: 25.0
     max-items: 3
-tags:
-  num_tags:
-    NoMoon: 25
-  feedback:
-    holo_visible: false
+  # When Journey is installed, append destinations to the LLM system prompt and run navigation
+  # when the model emits JOURNEY:<name_id> or the player message matches a known destination.
+  journey-actions:
     enabled: true
-    default: "Great observation! I'll take note of your discovery. Please continue thinking about the science concepts unique to this world. Feel free to show me something else or ask me about anything!"
-  NoMoon:
-    - tag:
-      aliases: tree
-      feedback: "The trees look kinda funny don't they? This is a really neat effect of the extreme wind as a result of having no moon. Why do you think they look this way?"
+    max-destinations: 60
 prompts:
   - label: 0
     prompt: agent
@@ -193,9 +214,8 @@ template-gui:
     custom-response-sign-header: "&f&nYour response"
     end-your-own-response-speech: "&f&nClick here to stop query"
     guidance-response: "&f&nCan you show me something cool?"
-    show-response: "&f&nI want to show you something unique to this environment!"
     score-response: "&f&nI want to see my scores"
-    tag-score-response: "&f&nI want to see my tag scores"
+    build-response: "&f&nI want to build something!"
     agent-edit: "&f&nI want to edit my agent"
   filler-item: white_stained_glass_pane
   inventory-name: "&lTopics"

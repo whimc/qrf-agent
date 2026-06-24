@@ -4,9 +4,9 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <groupId>edu.whimc</groupId>
-    <artifactId>WHIMC-OverworldAgent</artifactId>
-    <version>3.3.10</version>
-    <name>WHIMC Overworld Agent</name>
+    <artifactId>WHIMC-QRF-Agent</artifactId>
+    <version>3.3.16</version>
+    <name>WHIMC QRF Agent</name>
     <description>Defines overworld agent traits</description>
 
     <repositories>
@@ -166,6 +166,16 @@
                     <groupId>*</groupId>
                 </exclusion>
             </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.2.5</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-scratchpad</artifactId>
+            <version>5.2.5</version>
         </dependency>
         <dependency>
             <groupId>com.sk89q.worldguard</groupId>

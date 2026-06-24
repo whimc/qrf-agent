@@ -2,14 +2,14 @@ package edu.whimc.overworld_agent.commands.subcommands;
 
 import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.commands.AbstractSubCommand;
-import edu.whimc.overworld_agent.dialoguetemplate.BuilderDialogue;
 import edu.whimc.overworld_agent.dialoguetemplate.Dialogue;
 import edu.whimc.overworld_agent.dialoguetemplate.models.Chatbot;
-import edu.whimc.overworld_agent.dialoguetemplate.models.DialogueType;
 import edu.whimc.overworld_agent.dialoguetemplate.models.LlmProvider;
 import edu.whimc.overworld_agent.llm.context.AgentChatContextItem;
 import edu.whimc.overworld_agent.llm.context.AgentChatEvent;
 import edu.whimc.overworld_agent.llm.context.NpcContextProvider;
+import edu.whimc.overworld_agent.llm.research.AgentChatResearchLogger;
+import edu.whimc.overworld_agent.llm.research.AgentChatResearchTurn;
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
@@ -18,11 +18,8 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -71,19 +68,11 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
             player = (Player) sender;
         }
 
-        if (plugin.getAgentType().equals(DialogueType.GUIDE)) {
-            plugin.ensureAgentEdits(player);
-            Dialogue dialogue = new Dialogue(plugin, player, text, embodied);
-            dialogue.doDialogue();
-        } else {
-            if (plugin.getInProgressTemplates().containsKey(player)) {
-                BuilderDialogue bd = plugin.getInProgressTemplates().get(player);
-                bd.doDialogue();
-            } else {
-                BuilderDialogue bd = new BuilderDialogue(plugin, player, embodied);
-                bd.doDialogue();
-            }
-        }
+        // Single merged menu: guide options (guidance, scores, discussion, edit) plus the
+        // builder submenu (templates, base feedback) — no /agents chat_type switch needed.
+        plugin.ensureAgentEdits(player);
+        Dialogue dialogue = new Dialogue(plugin, player, text, embodied);
+        dialogue.doDialogue();
 
         return true;
     }
@@ -206,7 +195,8 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
         String playerResearchId = playerUuid; // Replace later with a de-identified research ID if needed.
         String sessionId = session.sessionId();
         String worldName = player.getWorld().getName();
-        String agentType = plugin.getAgentType().name();
+        // Research-log label; the old Guide/Builder mode switch was removed (menus are merged).
+        String agentType = "GUIDE";
         String agentName = "interactive-chat-agent";
 
         String providerName = plugin.getConfig().getString("llm.provider", "unknown");
@@ -339,27 +329,21 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
             logStage(traceId, "NPC_CONTEXT", "NPC context is disabled.");
         }
 
-        String baseSystemPrompt = plugin.getConfig().getString(
-                "llm.system-prompt",
-                "You are a friendly in-game science education assistant. Answer clearly and briefly; keep content appropriate for students."
-        );
-
         String systemPrompt;
 
         try {
-            logStage(traceId, "PROMPT_BASE",
-                    "Base system prompt length: " + baseSystemPrompt.length() + " characters");
+            systemPrompt = plugin.buildLlmSystemPrompt(player);
 
-            logStage(traceId, "RAG_CONTEXT", "Starting system prompt augmentation.");
-            systemPrompt = plugin.augmentLlmSystemPrompt(baseSystemPrompt);
+            logStage(traceId, "PROMPT_BASE",
+                    "System prompt length: " + systemPrompt.length() + " characters (world="
+                            + worldName + ")");
 
             if (!npcPromptContext.isBlank()) {
                 systemPrompt = systemPrompt + npcPromptContext;
             }
 
             logStage(traceId, "RAG_CONTEXT",
-                    "Finished system prompt augmentation. Final system prompt length: " +
-                            systemPrompt.length() + " characters");
+                    "Final system prompt length: " + systemPrompt.length() + " characters");
 
         } catch (Exception e) {
             String error = "Failed while preparing system prompt/context: " +
@@ -406,7 +390,7 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
         final List<AgentChatContextItem> finalContextItems = contextItems;
         final String finalSystemPrompt = systemPrompt;
         final String finalLlmUserMessage = llmUserMessage;
-        final String systemPromptHash = sha256OrNull(systemPrompt);
+        final String systemPromptHash = AgentChatResearchLogger.sha256OrNull(systemPrompt);
 
         player.sendMessage("Thinking...");
 
@@ -716,39 +700,35 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
             List<AgentChatContextItem> contextItems,
             List<AgentChatEvent> events
     ) {
-        if (plugin.getQueryer() == null) {
-            plugin.getLogger().warning("[OverworldAgent][ResearchDB] Queryer is null; cannot store chat research turn.");
-            return;
-        }
-
-        plugin.getQueryer().storeAgentChatResearchTurnWithContextItems(
-                conversationId,
-                turnId,
-                turnIndex,
-                time,
-                playerUuid,
-                username,
-                playerResearchId,
-                sessionId,
-                worldName,
-                agentType,
-                agentName,
-                command,
-                userMessage,
-                assistantResponse,
-                providerName,
-                modelName,
-                "default",
-                systemPromptHash,
-                ragEnabled,
-                userMessage,
-                requestStartedAt,
-                responseReceivedAt,
-                latencyMs,
-                status,
-                errorMessage,
-                contextItems == null ? List.of() : contextItems,
-                events == null ? List.of() : events
+        AgentChatResearchLogger.storeTurn(
+                plugin,
+                new AgentChatResearchTurn(
+                        conversationId,
+                        turnId,
+                        turnIndex,
+                        time,
+                        playerUuid,
+                        username,
+                        playerResearchId,
+                        sessionId,
+                        worldName,
+                        agentType,
+                        agentName,
+                        command,
+                        userMessage,
+                        assistantResponse,
+                        providerName,
+                        modelName,
+                        systemPromptHash,
+                        ragEnabled,
+                        requestStartedAt,
+                        responseReceivedAt,
+                        latencyMs,
+                        status,
+                        errorMessage,
+                        contextItems,
+                        events
+                )
         );
     }
 
@@ -758,13 +738,7 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
             String eventType,
             String message
     ) {
-        String payload =
-                "{" +
-                        "\"event_type\":\"" + jsonEscape(eventType) + "\"," +
-                        "\"message\":\"" + jsonEscape(message) + "\"" +
-                        "}";
-
-        return new AgentChatEvent(turnId, time, eventType, payload);
+        return AgentChatResearchLogger.simpleEvent(turnId, time, eventType, message);
     }
 
     private AgentChatEvent buildLlmRequestPayloadEvent(
@@ -779,33 +753,18 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
             boolean ragEnabled,
             List<AgentChatContextItem> contextItems
     ) {
-        String payload =
-                "{" +
-                        "\"trace_id\":\"" + jsonEscape(traceId) + "\"," +
-                        "\"conversation_id\":\"" + jsonEscape(conversationId) + "\"," +
-                        "\"turn_id\":\"" + jsonEscape(turnId) + "\"," +
-                        "\"command\":\"chat_message\"," +
-                        "\"provider\":\"" + jsonEscape(providerName) + "\"," +
-                        "\"model\":\"" + jsonEscape(modelName) + "\"," +
-                        "\"rag_enabled\":" + ragEnabled + "," +
-                        "\"context_item_count\":" + (contextItems == null ? 0 : contextItems.size()) + "," +
-                        "\"messages\":[" +
-                        "{" +
-                        "\"role\":\"system\"," +
-                        "\"content\":\"" + jsonEscape(systemPrompt) + "\"" +
-                        "}," +
-                        "{" +
-                        "\"role\":\"user\"," +
-                        "\"content\":\"" + jsonEscape(userMessage) + "\"" +
-                        "}" +
-                        "]" +
-                        "}";
-
-        return new AgentChatEvent(
+        return AgentChatResearchLogger.llmRequestPayloadEvent(
                 turnId,
                 time,
-                "llm_request_payload",
-                payload
+                conversationId,
+                traceId,
+                "chat_message",
+                providerName,
+                modelName,
+                systemPrompt,
+                userMessage,
+                ragEnabled,
+                contextItems
         );
     }
 
@@ -818,52 +777,9 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
             Integer latencyMs,
             String errorMessage
     ) {
-        String payload =
-                "{" +
-                        "\"trace_id\":\"" + jsonEscape(traceId) + "\"," +
-                        "\"status\":\"" + jsonEscape(status) + "\"," +
-                        "\"latency_ms\":" + (latencyMs == null ? "null" : latencyMs) + "," +
-                        "\"response\":\"" + jsonEscape(response) + "\"," +
-                        "\"error_message\":\"" + jsonEscape(errorMessage) + "\"" +
-                        "}";
-
-        return new AgentChatEvent(
-                turnId,
-                time,
-                "llm_response_payload",
-                payload
+        return AgentChatResearchLogger.llmResponsePayloadEvent(
+                turnId, time, traceId, response, status, latencyMs, errorMessage
         );
-    }
-
-    private String jsonEscape(String value) {
-        if (value == null) {
-            return "";
-        }
-
-        StringBuilder escaped = new StringBuilder();
-
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-
-            switch (c) {
-                case '"' -> escaped.append("\\\"");
-                case '\\' -> escaped.append("\\\\");
-                case '\b' -> escaped.append("\\b");
-                case '\f' -> escaped.append("\\f");
-                case '\n' -> escaped.append("\\n");
-                case '\r' -> escaped.append("\\r");
-                case '\t' -> escaped.append("\\t");
-                default -> {
-                    if (c < 0x20) {
-                        escaped.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        escaped.append(c);
-                    }
-                }
-            }
-        }
-
-        return escaped.toString();
     }
 
     private void logStage(String traceId, String stage, String message) {
@@ -880,21 +796,6 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
         }
 
         return throwable;
-    }
-
-    private String sha256OrNull(String value) {
-        if (value == null) {
-            return null;
-        }
-
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(hash);
-        } catch (Exception e) {
-            plugin.getLogger().warning("[OverworldAgent][LLM chat] Could not hash system prompt: " + e.getMessage());
-            return null;
-        }
     }
 
     @Override

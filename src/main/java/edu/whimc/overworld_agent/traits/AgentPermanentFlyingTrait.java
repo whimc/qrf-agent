@@ -57,12 +57,18 @@ public class AgentPermanentFlyingTrait extends Trait {
             if (npc.hasTrait(Gravity.class)) {
                 npc.removeTrait(Gravity.class);
             }
+            // Removing the Gravity trait does not necessarily restore entity gravity (e.g. after a mob form).
+            npc.getEntity().setGravity(true);
             if (npc.getEntity() instanceof Player player) {
                 player.setFlying(false);
                 player.setAllowFlight(false);
             }
-            float baseline = npc.getNavigator().getDefaultParameters().speed();
-            npc.getNavigator().getLocalParameters().speedModifier(baseline);
+            // speedModifier() is a percentage (1.0 = normal walk speed). The old code passed speed()
+            // (absolute blocks/tick, ~0.2 for players), which made player agents crawl-glide at ~20%
+            // speed instead of walking. Set on default params too: locals are recreated from defaults
+            // every time FollowTrait re-targets, so local-only values are lost between path updates.
+            npc.getNavigator().getDefaultParameters().speedModifier(1.0F);
+            npc.getNavigator().getLocalParameters().speedModifier(1.0F);
             if (npc.hasTrait(FollowTrait.class)) {
                 AgentFollowTuning.applyForCurrentEntity(plugin, npc);
             }
@@ -72,15 +78,12 @@ public class AgentPermanentFlyingTrait extends Trait {
         Gravity gravity = npc.getOrAddTrait(Gravity.class);
         gravity.setHasGravity(false);
 
-        float baseline = npc.getNavigator().getDefaultParameters().speed();
         npc.setFlyable(true);
 
         double mult = plugin.getConfig().getDouble(CONFIG_SPEED_MULT_KEY, 1.65);
-        if (mult > 0) {
-            npc.getNavigator().getLocalParameters().speedModifier(baseline * (float) mult);
-        } else {
-            npc.getNavigator().getLocalParameters().speedModifier(baseline);
-        }
+        float modifier = mult > 0 ? (float) mult : 1.0F;
+        npc.getNavigator().getDefaultParameters().speedModifier(modifier);
+        npc.getNavigator().getLocalParameters().speedModifier(modifier);
 
         if (npc.hasTrait(FollowTrait.class)) {
             AgentFollowTuning.applyForCurrentEntity(plugin, npc);

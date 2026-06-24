@@ -20,6 +20,8 @@ public final class AgentFollowTuning {
     private static final String CFG_MOB_RANGE = "agent-mob-follow-path-range";
     private static final String CFG_MOB_MARGIN = "agent-mob-follow-margin";
 
+    private static final AgentFollowStuckAction PLAYER_STUCK_ACTION = new AgentFollowStuckAction();
+
     private AgentFollowTuning() {}
 
     /**
@@ -35,6 +37,7 @@ public final class AgentFollowTuning {
                 return;
             }
             npc.getOrAddTrait(FollowTrait.class).follow(player);
+            npc.getOrAddTrait(AgentFollowCatchUpTrait.class);
             npc.getOrAddTrait(AgentPermanentFlyingTrait.class).applyFlyingForCurrentEntity();
         });
     }
@@ -58,10 +61,14 @@ public final class AgentFollowTuning {
             npc.getNavigator().getLocalParameters().destinationTeleportMargin(destTele);
             npc.getNavigator().getDefaultParameters().stationaryTicks(stationaryTicks);
             npc.getNavigator().getLocalParameters().stationaryTicks(stationaryTicks);
-            // After a mob agent, default params may still carry low straight-line thresholds — ground NPCs need pathfinding.
-            float straight = Math.max(range, 32.0f);
-            npc.getNavigator().getDefaultParameters().straightLineTargetingDistance(straight);
-            npc.getNavigator().getLocalParameters().straightLineTargetingDistance(straight);
+            // Walk like the original guide agents: straight-line targeting makes Citizens steer
+            // directly at the player (gliding over terrain) instead of A* pathfinding + walking.
+            // 0 disables it so player-shaped agents always pathfind and WALK while following
+            // (Citizens wiki "Making an NPC Move": navigator.setTarget -> pathfind).
+            npc.getNavigator().getDefaultParameters().straightLineTargetingDistance(0);
+            npc.getNavigator().getLocalParameters().straightLineTargetingDistance(0);
+            npc.getNavigator().getDefaultParameters().stuckAction(PLAYER_STUCK_ACTION);
+            npc.getNavigator().getLocalParameters().stuckAction(PLAYER_STUCK_ACTION);
             ft.setFollowingMargin(margin);
         } else {
             float range = (float) plugin.getConfig().getDouble(CFG_MOB_RANGE, 5);

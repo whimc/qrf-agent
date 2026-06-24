@@ -1,5 +1,6 @@
 package edu.whimc.overworld_agent;
 
+import edu.whimc.overworld_agent.traits.AgentFollowCatchUpTrait;
 import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import net.citizensnpcs.api.CitizensAPI;
@@ -81,6 +82,7 @@ public class Listeners  implements Listener {
         NPC npc = agents.get(player.getName());
         if(npc != null) {
             npc.getOrAddTrait(AgentPermanentFlyingTrait.class);
+            npc.getOrAddTrait(AgentFollowCatchUpTrait.class);
             npc.spawn(player.getLocation());
             AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
         }

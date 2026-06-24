@@ -3,7 +3,7 @@ package edu.whimc.overworld_agent.utils.sql;
 
 import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.dialoguetemplate.Interaction;
-import edu.whimc.overworld_agent.dialoguetemplate.Tag;
+import edu.whimc.overworld_agent.dialoguetemplate.JourneyGuidanceCatalog;
 import edu.whimc.overworld_agent.dialoguetemplate.models.BuildTemplate;
 import edu.whimc.overworld_agent.llm.context.AgentChatContextItem;
 import edu.whimc.overworld_agent.llm.context.AgentChatEvent;
@@ -19,7 +19,10 @@ import java.sql.*;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -43,13 +46,6 @@ public class Queryer {
             "INSERT INTO whimc_dialog_science " +
                     "(uuid, username, world, time, science_inquiry, agent_response) " +
                     "VALUES (?, ?, ?, ?, ?, ?)";
-    /**
-     * Query for inserting a progress entry into the database.
-     */
-    private static final String QUERY_SAVE_TAG =
-            "INSERT INTO whimc_tags " +
-                    "(uuid, username, world, x, y, z, time, tag, active, expiration) " +
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
     /**
      * Query for inserting a progress entry into the database.
      */
@@ -82,18 +78,6 @@ public class Queryer {
     private static final String QUERY_GET_SESSION_CONVERSATION =
             "SELECT * FROM whimc_dialog_science "+
                     "WHERE uuid=? AND time > ? ";
-    private static final String QUERY_MAKE_EXPIRED_INACTIVE =
-            "UPDATE whimc_tags " +
-                    "SET active=0 " +
-                    "WHERE ? > expiration";
-    /**
-     * Query for making an observation inactive.
-     */
-    private static final String QUERY_MAKE_TAG_INACTIVE =
-            "UPDATE whimc_tags " +
-                    "SET active=0 " +
-                    "WHERE rowid=? AND active=1";
-
     /**
      * Query for saving an agent chat conversation.
      */
@@ -132,6 +116,11 @@ public class Queryer {
             "INSERT INTO whimc_agent_chat_events " +
                     "(turn_id, time, event_type, event_payload) " +
                     "VALUES (?, ?, ?, ?)";
+
+    private static final String QUERY_LIST_POI_REGIONS =
+            "SELECT r.id, w.name AS world_name FROM %sregion r "
+                    + "INNER JOIN %sworld w ON r.world_id = w.id "
+                    + "WHERE r.id LIKE ? AND w.name LIKE ?";
 
     private final OverworldAgent plugin;
     private final MySQLConnection sqlConnection;
@@ -231,53 +220,6 @@ public class Queryer {
             try (Connection connection = this.sqlConnection.getConnection()) {
                 try (PreparedStatement statement = insertScienceInquiry(connection, player, inquiry, response)) {
                     String query = statement.toString().substring(statement.toString().indexOf(" ") + 1);
-                    statement.executeUpdate();
-
-                    try (ResultSet idRes = statement.getGeneratedKeys()) {
-                        idRes.next();
-                        int id = idRes.getInt(1);
-
-                        sync(callback, id);
-                    }
-                }
-            } catch (SQLException e) {
-                e.printStackTrace();
-            }
-        });
-    }
-
-    /**
-     * Generated a PreparedStatement for saving a new progress session.
-     * @param connection MySQL Connection
-     * @param tag player tag put into overworld
-     * @return PreparedStatement
-     * @throws SQLException
-     */
-    private PreparedStatement insertTag(Connection connection, Tag tag) throws SQLException {
-        PreparedStatement statement = connection.prepareStatement(QUERY_SAVE_TAG, Statement.RETURN_GENERATED_KEYS);
-        statement.setString(1, tag.getPlayer().getUniqueId().toString());
-        statement.setString(2, tag.getPlayer().getName());
-        statement.setString(3, tag.getPlayer().getWorld().getName());
-        statement.setDouble(4, tag.getHoloLocation().getX());
-        statement.setDouble(5, tag.getHoloLocation().getY());
-        statement.setDouble(6, tag.getHoloLocation().getZ());
-        statement.setLong(7, tag.getTagTime().getTime());
-        statement.setString(8, tag.getTag());
-        statement.setBoolean(9, tag.getActive());
-        statement.setLong(10, tag.getExpiration().getTime());
-        return statement;
-    }
-
-    /**
-     * Stores a progress command into the database and returns the obervation's ID
-     * @param tag tag player placed
-     * @param callback    Function to call once the observation has been saved
-     */
-    public void storeNewTag(Tag tag, Consumer<Integer> callback) {
-        async(() -> {
-
-            try (Connection connection = this.sqlConnection.getConnection()) {
-                try (PreparedStatement statement = insertTag(connection, tag)) {
                     statement.executeUpdate();
 
                     try (ResultSet idRes = statement.getGeneratedKeys()) {
@@ -483,38 +425,6 @@ public class Queryer {
                 }
             } catch (SQLException exc) {
                 exc.printStackTrace();
-            }
-        });
-    }
-
-    /**
-     * Makes an observation inactive in the database.
-     *
-     * @param id Id of the observation
-     */
-    public void makeSingleTagInactive(int id, Runnable callback) {
-        async(() -> {
-            try (Connection connection = this.sqlConnection.getConnection()) {
-                try (PreparedStatement statement = connection.prepareStatement(QUERY_MAKE_TAG_INACTIVE)) {
-                    statement.setInt(1, id);
-                    statement.executeUpdate();
-                    sync(callback);
-                }
-            } catch (SQLException exc) {
-                exc.printStackTrace();
-            }
-        });
-    }
-
-    public void makeExpiredTagsInactive(Consumer<Integer> callback) {
-        async(() -> {
-            try (Connection connection = this.sqlConnection.getConnection()) {
-                try (PreparedStatement statement = connection.prepareStatement(QUERY_MAKE_EXPIRED_INACTIVE)) {
-                    statement.setLong(1, System.currentTimeMillis());
-                    sync(callback, statement.executeUpdate());
-                }
-            } catch (SQLException e) {
-                e.printStackTrace();
             }
         });
     }
@@ -948,6 +858,50 @@ public class Queryer {
 
     private void async(Runnable runnable) {
         Bukkit.getScheduler().runTaskAsynchronously(this.plugin, runnable);
+    }
+
+    /**
+     * WorldGuard MySQL POI regions ({@code poi-*} ids in {@code rg_region}) for worlds sharing a name prefix.
+     */
+    public void listPoiRegions(String worldNamePrefix, String poiRegionPrefix, String worldguardTablePrefix,
+            Consumer<List<JourneyGuidanceCatalog.Destination>> callback) {
+        if (callback == null) {
+            return;
+        }
+        String worldPrefix = worldNamePrefix == null ? "" : worldNamePrefix.trim();
+        String poiPrefix = poiRegionPrefix == null ? "poi-" : poiRegionPrefix;
+        String tablePrefix = worldguardTablePrefix == null ? "rg_" : worldguardTablePrefix;
+        async(() -> {
+            List<JourneyGuidanceCatalog.Destination> out = new ArrayList<>();
+            try (Connection connection = this.sqlConnection.getConnection()) {
+                if (connection == null) {
+                    sync(callback, out);
+                    return;
+                }
+                String sql = String.format(QUERY_LIST_POI_REGIONS, tablePrefix, tablePrefix);
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    statement.setString(1, poiPrefix + "%");
+                    statement.setString(2, worldPrefix + "%");
+                    try (ResultSet results = statement.executeQuery()) {
+                        Map<String, JourneyGuidanceCatalog.Destination> byKey = new LinkedHashMap<>();
+                        while (results.next()) {
+                            String id = results.getString("id");
+                            if (id == null || id.isBlank()) {
+                                continue;
+                            }
+                            String key = id.toLowerCase(Locale.ROOT);
+                            byKey.putIfAbsent(key, new JourneyGuidanceCatalog.Destination(
+                                    key,
+                                    JourneyGuidanceCatalog.formatPoiLabel(id, poiPrefix)));
+                        }
+                        out.addAll(byKey.values());
+                    }
+                }
+            } catch (SQLException exc) {
+                plugin.getLogger().warning("Failed to load POI regions from WorldGuard tables: " + exc.getMessage());
+            }
+            sync(callback, out);
+        });
     }
 
 

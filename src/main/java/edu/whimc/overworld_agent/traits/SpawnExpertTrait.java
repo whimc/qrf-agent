@@ -92,7 +92,7 @@ public class SpawnExpertTrait extends Trait {
                 if (Settings.Setting.FOLLOW_ACROSS_WORLDS.asBoolean()) {
                     Player follower = Bukkit.getPlayer(player);
                     npc.despawn();
-                    npc.spawn(follower.getLocation());
+                    npc.spawn(AgentFollowCatchUp.besidePlayer(follower, AgentFollowCatchUp.besideOffset(plugin)));
                     AgentFollowTuning.applyForCurrentEntity(plugin, npc);
                     AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, follower);
                 }
