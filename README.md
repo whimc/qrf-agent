@@ -252,7 +252,7 @@ Separate from embodied right-click dialogue and from `llm.use-for-reply` on the 
 
 **Research logging (MySQL)**
 
-Each turn is stored for analysis (conversation id, turn index, provider/model, latency, status, errors). Related tables:
+Each turn from **`/agent chat test`** and from **dialogue free discussion** (Discuss something → chat input, `command = dialogue_discussion`) is stored for analysis (conversation id, turn index, provider/model, latency, status, errors). PMML-only dialogue turns log with `provider = pmml`; LLM dialogue turns include full request/response payloads. Related tables:
 
 | Table | Purpose |
 |-------|---------|

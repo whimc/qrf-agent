@@ -8,6 +8,9 @@ import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import edu.whimc.overworld_agent.dialoguetemplate.models.Chatbot;
 import edu.whimc.overworld_agent.dialoguetemplate.models.DialoguePrompt;
+import edu.whimc.overworld_agent.llm.context.AgentChatEvent;
+import edu.whimc.overworld_agent.llm.research.AgentChatResearchLogger;
+import edu.whimc.overworld_agent.llm.research.AgentChatResearchTurn;
 
 import edu.whimc.overworld_agent.utils.AgentEntityTypes;
 import edu.whimc.overworld_agent.utils.Utils;
@@ -57,6 +60,7 @@ public class Dialogue implements Listener {
     private final double THRESHOLD = .5;
     private final int AGENT_EDIT_NUM = 5;
     private static final int MAX_DISCUSSION_HISTORY = 10;
+    private static final String DIALOGUE_DISCUSSION_COMMAND = "dialogue_discussion";
     private String feedback;
     private String response;
     private boolean text;
@@ -64,6 +68,9 @@ public class Dialogue implements Listener {
     private Map<Integer, DialoguePrompt> prompts;
     /** Short-term memory for the ongoing free-discussion chat; only sent to the LLM path. */
     private final List<String> discussionHistory = new ArrayList<>();
+    private String discussionConversationId;
+    private String discussionSessionId;
+    private int discussionTurnIndex;
     public Dialogue(OverworldAgent plugin, Player player, boolean text, boolean embodied) {
         this.spigotCallback = plugin.getSpigotCallback();
         this.plugin = plugin;
@@ -1355,8 +1362,20 @@ public class Dialogue implements Listener {
         //Janky but waits until event is done before stores in db
         DialoguePrompt finalPrompt1 = prompt;
         final String[] feedbackOut = {feedback};
+        final int finalPredictedClass = predictedClass;
+        final double finalCertainty = certainty;
+        final boolean[] dialogueResearchLogged = {false};
 
         Runnable storeAndSend = () -> Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            if (!dialogueResearchLogged[0]) {
+                logDialogueDiscussionPmmlTurn(
+                        finalResponse,
+                        feedbackOut[0],
+                        finalPrompt1,
+                        finalPredictedClass,
+                        finalCertainty
+                );
+            }
             this.plugin.getQueryer().storeNewScienceInquiry(player, finalResponse, feedbackOut[0], id -> {
                 this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Dialogue"), id2 -> {
                     if (finalPrompt1 != null && !finalPrompt1.getPrompt().equalsIgnoreCase("science_tool")) {
@@ -1382,7 +1401,17 @@ public class Dialogue implements Listener {
                     systemPrompt = JourneyLlmBridge.appendDestinationContext(systemPrompt, destinations, max);
                 }
                 final String llmSystemPrompt = systemPrompt;
-                Chatbot llmChatbot = new Chatbot(buildLlmMessageWithHistory(finalResponse));
+                final String llmUserMessage = buildLlmMessageWithHistory(finalResponse);
+                final long requestStartedAt = System.currentTimeMillis();
+                final String turnId = newDiscussionTurnId();
+                final int turnIndex = nextDiscussionTurnIndex();
+                final String traceId = UUID.randomUUID().toString().substring(0, 8);
+                final String providerName = plugin.getConfig().getString("llm.provider", "unknown");
+                final String modelName = plugin.getConfig().getString("llm.model", "unknown");
+                final boolean ragEnabled = plugin.getConfig().getBoolean("llm.rag.enabled", false);
+                final String systemPromptHash = AgentChatResearchLogger.sha256OrNull(llmSystemPrompt);
+
+                Chatbot llmChatbot = new Chatbot(llmUserMessage);
                 CompletableFuture.supplyAsync(() -> {
                     try {
                         return llmChatbot.generateLlmReply(plugin.getLlmProvider(), llmSystemPrompt);
@@ -1391,9 +1420,16 @@ public class Dialogue implements Listener {
                         return null;
                     }
                 }).thenAccept(llmText -> Bukkit.getScheduler().runTask(plugin, () -> {
+                    long responseReceivedAt = System.currentTimeMillis();
+                    int latencyMs = (int) (responseReceivedAt - requestStartedAt);
+                    String status;
+                    String errorMessage = null;
+                    String assistantForLog = feedbackOut[0];
+
                     if (llmText != null && !llmText.isBlank()) {
                         JourneyLlmBridge.ParsedReply parsed = JourneyLlmBridge.parseLlmReply(llmText);
                         feedbackOut[0] = parsed.displayText().isBlank() ? llmText : parsed.displayText();
+                        assistantForLog = feedbackOut[0];
                         String journeyTarget = parsed.journeyNameId();
                         if (journeyTarget == null && journeyActions) {
                             journeyTarget = JourneyLlmBridge.matchDestination(finalResponse, destinations).orElse(null);
@@ -1406,7 +1442,34 @@ public class Dialogue implements Listener {
                                             + journeyTarget);
                             dispatchJourneyCommand(player, journeyTarget);
                         }
+                        status = "SUCCESS";
+                    } else {
+                        status = "FALLBACK_PMML";
+                        errorMessage = "LLM returned no response; PMML/template reply shown.";
                     }
+
+                    dialogueResearchLogged[0] = true;
+                    logDialogueDiscussionLlmTurn(
+                            turnId,
+                            turnIndex,
+                            requestStartedAt,
+                            responseReceivedAt,
+                            latencyMs,
+                            finalResponse,
+                            assistantForLog,
+                            providerName,
+                            modelName,
+                            llmSystemPrompt,
+                            llmUserMessage,
+                            systemPromptHash,
+                            ragEnabled,
+                            status,
+                            errorMessage,
+                            traceId,
+                            finalPrompt1,
+                            finalPredictedClass,
+                            finalCertainty
+                    );
                     recordDiscussionTurn(finalResponse, feedbackOut[0]);
                     storeAndSend.run();
                 }));
@@ -1442,6 +1505,171 @@ public class Dialogue implements Listener {
         while (discussionHistory.size() > MAX_DISCUSSION_HISTORY) {
             discussionHistory.remove(0);
         }
+    }
+
+    private void ensureDiscussionConversation() {
+        if (discussionConversationId == null) {
+            discussionConversationId = UUID.randomUUID().toString();
+            discussionSessionId = player.getUniqueId().toString() + "-" + System.currentTimeMillis();
+            discussionTurnIndex = 0;
+        }
+    }
+
+    private String newDiscussionTurnId() {
+        ensureDiscussionConversation();
+        return UUID.randomUUID().toString();
+    }
+
+    private int nextDiscussionTurnIndex() {
+        ensureDiscussionConversation();
+        discussionTurnIndex++;
+        return discussionTurnIndex;
+    }
+
+    private String dialogueAgentType() {
+        return embodied ? "EMBODIED_GUIDE" : "GUIDE";
+    }
+
+    private String dialogueAgentName() {
+        NPC npc = plugin.getAgents().get(player.getName());
+        if (npc != null && npc.getName() != null && !npc.getName().isBlank()) {
+            return npc.getName();
+        }
+        return embodied ? "embodied-dialogue-agent" : "dialogue-agent";
+    }
+
+    private String dialogueIntentLabel(DialoguePrompt prompt) {
+        if (prompt == null || prompt.getPrompt() == null) {
+            return "unknown";
+        }
+        return prompt.getPrompt();
+    }
+
+    private void logDialogueDiscussionPmmlTurn(
+            String userMessage,
+            String assistantResponse,
+            DialoguePrompt prompt,
+            int predictedClass,
+            double certainty
+    ) {
+        long time = System.currentTimeMillis();
+        String turnId = newDiscussionTurnId();
+        int turnIndex = nextDiscussionTurnIndex();
+        String intentLabel = dialogueIntentLabel(prompt);
+
+        List<AgentChatEvent> events = List.of(
+                AgentChatResearchLogger.pmmlIntentEvent(turnId, time, predictedClass, certainty, intentLabel)
+        );
+
+        AgentChatResearchLogger.storeTurn(
+                plugin,
+                new AgentChatResearchTurn(
+                        discussionConversationId,
+                        turnId,
+                        turnIndex,
+                        time,
+                        player.getUniqueId().toString(),
+                        player.getName(),
+                        player.getUniqueId().toString(),
+                        discussionSessionId,
+                        player.getWorld().getName(),
+                        dialogueAgentType(),
+                        dialogueAgentName(),
+                        DIALOGUE_DISCUSSION_COMMAND,
+                        userMessage,
+                        assistantResponse,
+                        "pmml",
+                        "dialogue-intent",
+                        null,
+                        false,
+                        time,
+                        time,
+                        0,
+                        "SUCCESS",
+                        null,
+                        List.of(),
+                        events
+                )
+        );
+    }
+
+    private void logDialogueDiscussionLlmTurn(
+            String turnId,
+            int turnIndex,
+            long requestStartedAt,
+            long responseReceivedAt,
+            int latencyMs,
+            String userMessage,
+            String assistantResponse,
+            String providerName,
+            String modelName,
+            String systemPrompt,
+            String llmUserMessage,
+            String systemPromptHash,
+            boolean ragEnabled,
+            String status,
+            String errorMessage,
+            String traceId,
+            DialoguePrompt prompt,
+            int predictedClass,
+            double certainty
+    ) {
+        String intentLabel = dialogueIntentLabel(prompt);
+        List<AgentChatEvent> events = List.of(
+                AgentChatResearchLogger.pmmlIntentEvent(
+                        turnId, requestStartedAt, predictedClass, certainty, intentLabel),
+                AgentChatResearchLogger.llmRequestPayloadEvent(
+                        turnId,
+                        requestStartedAt,
+                        discussionConversationId,
+                        traceId,
+                        DIALOGUE_DISCUSSION_COMMAND,
+                        providerName,
+                        modelName,
+                        systemPrompt,
+                        llmUserMessage,
+                        ragEnabled,
+                        List.of()),
+                AgentChatResearchLogger.llmResponsePayloadEvent(
+                        turnId,
+                        responseReceivedAt,
+                        traceId,
+                        assistantResponse,
+                        status,
+                        latencyMs,
+                        errorMessage)
+        );
+
+        AgentChatResearchLogger.storeTurn(
+                plugin,
+                new AgentChatResearchTurn(
+                        discussionConversationId,
+                        turnId,
+                        turnIndex,
+                        requestStartedAt,
+                        player.getUniqueId().toString(),
+                        player.getName(),
+                        player.getUniqueId().toString(),
+                        discussionSessionId,
+                        player.getWorld().getName(),
+                        dialogueAgentType(),
+                        dialogueAgentName(),
+                        DIALOGUE_DISCUSSION_COMMAND,
+                        userMessage,
+                        assistantResponse,
+                        providerName,
+                        modelName,
+                        systemPromptHash,
+                        ragEnabled,
+                        requestStartedAt,
+                        responseReceivedAt,
+                        latencyMs,
+                        status,
+                        errorMessage,
+                        List.of(),
+                        events
+                )
+        );
     }
 
     private void sendComponent(Player player, String text, String hoverText, Consumer<Player> onClick) {
