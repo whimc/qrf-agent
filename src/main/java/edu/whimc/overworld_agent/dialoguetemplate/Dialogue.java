@@ -117,8 +117,13 @@ public class Dialogue implements Listener {
         Object manager = journeyPublicWaypointManager();
         Object waypoint = manager == null ? null : invokeGetWaypoint(manager, nameId);
         String displayName = waypoint == null ? null : extractWaypointName(waypoint);
+        if (displayName == null && manager != null && waypoint != null) {
+            displayName = lookupPublicWaypointDisplayName(manager, nameId);
+        }
         Integer waypointDomain = waypoint == null ? null : waypointCellDomain(waypoint);
         Integer playerDomain = journeyDomainForWorldSafe(player.getWorld());
+        boolean preferApi = !"command".equalsIgnoreCase(StringUtils.trimToEmpty(
+                cfg.getString("journey.dispatch-command", "auto")));
 
         String journeyRoot = cfg.getString("journey.journey-command-root", "journey");
         String journeytoRoot = StringUtils.trimToEmpty(cfg.getString("journey.journeyto-command-root", "jt"));
@@ -149,20 +154,22 @@ public class Dialogue implements Listener {
                             + player.getWorld().getName());
         }
 
-        plugin.getLogger().info(
-                "[OverworldAgent][Journey] dispatch as player "
-                        + player.getName()
-                        + ": /"
-                        + primaryCmd
-                        + (commands.size() > 1 ? " (fallbacks: " + commands.subList(1, commands.size()) + ")" : "")
-                        + " (nameId="
-                        + nameId
-                        + ", raw="
-                        + rawDestination
-                        + ", dispatch-command="
-                        + cfg.getString("journey.dispatch-command", "auto")
-                        + ")");
-        Runnable runDispatch = () -> {
+        if (!(preferApi && waypoint != null)) {
+            plugin.getLogger().info(
+                    "[OverworldAgent][Journey] dispatch as player "
+                            + player.getName()
+                            + ": /"
+                            + primaryCmd
+                            + (commands.size() > 1 ? " (fallbacks: " + commands.subList(1, commands.size()) + ")" : "")
+                            + " (nameId="
+                            + nameId
+                            + ", raw="
+                            + rawDestination
+                            + ", dispatch-command="
+                            + cfg.getString("journey.dispatch-command", "auto")
+                            + ")");
+        }
+        Runnable runCommandDispatch = () -> {
             Throwable lastError = null;
             for (int attempt = 0; attempt < commands.size(); attempt++) {
                 String cmd = commands.get(attempt);
@@ -213,10 +220,15 @@ public class Dialogue implements Listener {
                         ChatColor.RED + "Journey did not run that command. Try /" + primaryCmd + " manually.");
             }
         };
+        if (preferApi && waypoint != null) {
+            boolean debug = cfg.getBoolean("journey.debug-log", false);
+            JourneyNavigationHelper.scheduleNavigation(plugin, player, nameId, plugin.getLogger(), debug, runCommandDispatch);
+            return;
+        }
         if (Bukkit.isPrimaryThread()) {
-            runDispatch.run();
+            runCommandDispatch.run();
         } else {
-            Bukkit.getScheduler().runTask(plugin, runDispatch);
+            Bukkit.getScheduler().runTask(plugin, runCommandDispatch);
         }
     }
 
@@ -386,6 +398,10 @@ public class Dialogue implements Listener {
     private static Integer waypointCellDomain(Object waypoint) {
         if (waypoint == null) {
             return null;
+        }
+        Integer direct = cellDomainIndex(waypoint);
+        if (direct != null) {
+            return direct;
         }
         Object cell = null;
         for (String accessor : new String[] {"location", "cell", "getLocation", "getCell"}) {
@@ -609,9 +625,34 @@ public class Dialogue implements Listener {
         }
     }
 
+    private static String lookupPublicWaypointDisplayName(Object publicWaypointManager, String nameId) {
+        if (publicWaypointManager == null || StringUtils.isBlank(nameId)) {
+            return null;
+        }
+        try {
+            Object all = publicWaypointManager.getClass().getMethod("getAll").invoke(publicWaypointManager);
+            if (all == null) {
+                return null;
+            }
+            String needle = nameId.toLowerCase(Locale.ROOT);
+            for (Object item : flattenWaypointContainer(all)) {
+                String label = extractWaypointName(item);
+                String key = resolveNameIdForWaypoint(publicWaypointManager, item, label);
+                if (needle.equals(key)) {
+                    return StringUtils.isNotBlank(label) ? label : nameId;
+                }
+            }
+        } catch (ReflectiveOperationException ignored) {
+        }
+        return null;
+    }
+
     private static Object extractWaypointCell(Object waypoint) {
         if (waypoint == null) {
             return null;
+        }
+        if (cellCoords(waypoint) != null) {
+            return waypoint;
         }
         for (String accessor : new String[] {"location", "cell", "getLocation", "getCell"}) {
             try {

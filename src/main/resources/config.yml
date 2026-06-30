@@ -9,7 +9,8 @@ journey:
   journey-command-root: journey
   # Alias for /journeyto (default jt). Used when dispatch-command is journeyto_* or auto for npc-/poi- waypoints.
   journeyto-command-root: jt
-  # auto = /journey server waypoint <name_id> (avoids /jt scope merge). Do NOT use journeyto_* if Journey logs Duplicate key.
+  # auto = Journey API (supports name_ids with underscores); falls back to /journey server waypoint <name_id>.
+  # command = always use /journey (Journey's lexer cannot parse unquoted name_ids containing "_").
   dispatch-command: auto
   # When true, logs Journey domain / public waypoint counts when opening the guidance menu (console).
   debug-log: false
