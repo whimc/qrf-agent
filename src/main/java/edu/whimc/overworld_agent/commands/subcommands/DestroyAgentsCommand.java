@@ -26,6 +26,11 @@ public class DestroyAgentsCommand extends AbstractSubCommand {
     }
 
     @Override
+    protected boolean requiresSubcommandPermission() {
+        return false;
+    }
+
+    @Override
     public boolean executeSubCommand(CommandSender sender, String[] args) {
         if (!AgentPermissions.canUseDestroy(sender)) {
             AgentPermissions.deny(sender, AgentPermissions.DESTROY_SELF);

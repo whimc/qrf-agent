@@ -52,11 +52,11 @@ public final class AgentPermissions {
         childOnly("spawn.player", "Spawn player-model agents", PermissionDefault.TRUE, SPAWN);
         childOnly("spawn.animal", "Spawn animal mob agents", PermissionDefault.FALSE, SPAWN);
 
-        childOnly("despawn.self", "Despawn your own agent", PermissionDefault.FALSE, DESPAWN);
+        childOnly("despawn.self", "Despawn your own agent", PermissionDefault.TRUE, DESPAWN);
         childOnly("despawn.other", "Despawn another player's agent", PermissionDefault.FALSE, DESPAWN);
         childOnly("despawn.all", "Despawn every online player's agent", PermissionDefault.FALSE, DESPAWN);
 
-        childOnly("destroy.self", "Destroy your own agent", PermissionDefault.FALSE, DESTROY);
+        childOnly("destroy.self", "Destroy your own agent", PermissionDefault.TRUE, DESTROY);
         childOnly("destroy.other", "Destroy another player's agent", PermissionDefault.FALSE, DESTROY);
         childOnly("destroy.all", "Destroy every agent", PermissionDefault.FALSE, DESTROY);
 

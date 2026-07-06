@@ -28,6 +28,11 @@ public class DespawnAgentsCommand extends AbstractSubCommand {
     }
 
     @Override
+    protected boolean requiresSubcommandPermission() {
+        return false;
+    }
+
+    @Override
     public boolean executeSubCommand(CommandSender sender, String[] args) {
         if (!AgentPermissions.canUseDespawn(sender)) {
             AgentPermissions.deny(sender, AgentPermissions.DESPAWN_SELF);
