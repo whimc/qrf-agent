@@ -13,6 +13,7 @@ import edu.whimc.overworld_agent.llm.research.AgentChatResearchLogger;
 import edu.whimc.overworld_agent.llm.research.AgentChatResearchTurn;
 
 import edu.whimc.overworld_agent.utils.AgentEntityTypes;
+import edu.whimc.overworld_agent.utils.AgentPermissions;
 import edu.whimc.overworld_agent.utils.Utils;
 import edu.whimc.sciencetools.models.sciencetool.ScienceTool;
 import edu.whimc.sciencetools.models.sciencetool.ScienceToolMeasureEvent;
@@ -1116,20 +1117,26 @@ public class Dialogue implements Listener {
                 });
 
         //Agent Build option (templates + base feedback; merged from the old chat_type Builder menu)
-        String buildResponse = cfg.getString("template-gui.text.build-response",
-                "&f&nI want to build something!");
-        sendComponent(
-                player,
-                "&8" + BULLET + buildResponse,
-                "&aClick here for build templates and base feedback!",
-                p -> openBuilderMenu()
-        );
+        if (plugin.isBuilderEnabled()) {
+            String buildResponse = cfg.getString("template-gui.text.build-response",
+                    "&f&nI want to build something!");
+            sendComponent(
+                    player,
+                    "&8" + BULLET + buildResponse,
+                    "&aClick here for build templates and base feedback!",
+                    p -> openBuilderMenu()
+            );
+        }
 
         Map<String, Integer> edits = plugin.getAgentEdits().get(player);
         int skinChange = edits.get("Skin");
         int nameChange = edits.get("Name");
         int typeChange = edits.getOrDefault("Type", 0);
-        if((skinChange < AGENT_EDIT_NUM || nameChange < AGENT_EDIT_NUM || typeChange < AGENT_EDIT_NUM) && embodied){
+        boolean canEditName = AgentPermissions.canEditName(player) && nameChange < AGENT_EDIT_NUM;
+        boolean canEditSkin = AgentPermissions.canEditSkin(player) && skinChange < AGENT_EDIT_NUM;
+        boolean canEditType = AgentPermissions.canEditTypeMenu(player) && typeChange < AGENT_EDIT_NUM;
+        if (embodied && AgentPermissions.canOpenEditMenu(player)
+                && (canEditName || canEditSkin || canEditType)) {
             //Agent edit Option
             sendComponent(player, "&8" + BULLET + agentEdit, "&aClick here to change me!", p -> openEditMenu());
         }
@@ -1150,6 +1157,9 @@ public class Dialogue implements Listener {
      * reusing an in-progress builder session when one exists so template state is kept.
      */
     private void openBuilderMenu() {
+        if (!plugin.isBuilderEnabled()) {
+            return;
+        }
         BuilderDialogue bd = plugin.getInProgressTemplates().get(player);
         if (bd == null) {
             bd = new BuilderDialogue(plugin, player, embodied);
@@ -1179,13 +1189,15 @@ public class Dialogue implements Listener {
         int nameChange = edits.get("Name");
         int typeChange = edits.getOrDefault("Type", 0);
         NPC ownedForEdit = plugin.getAgents().get(player.getName());
-        boolean canEditSkin = ownedForEdit != null && ownedForEdit.isSpawned() && ownedForEdit.getEntity() != null
+        boolean canEditSkin = AgentPermissions.canEditSkin(player)
+                && skinChange < AGENT_EDIT_NUM
+                && ownedForEdit != null && ownedForEdit.isSpawned() && ownedForEdit.getEntity() != null
                 && ownedForEdit.getEntity().getType() == EntityType.PLAYER;
 
         this.spigotCallback.clearCallbacks(player);
         Utils.msgNoPrefix(player, "&lClick what you want to change:", "");
 
-            if(skinChange < AGENT_EDIT_NUM && canEditSkin) {
+            if(canEditSkin) {
                 sendComponent(
                         player,
                         "&8" + BULLET + " &rSkin",
@@ -1229,7 +1241,7 @@ public class Dialogue implements Listener {
                             sendBackOption(this::openEditMenu);
                         });
             }
-            if(nameChange < AGENT_EDIT_NUM){
+            if (AgentPermissions.canEditName(player) && nameChange < AGENT_EDIT_NUM) {
             sendComponent(
                     player,
                     "&8" + BULLET + " &rName",
@@ -1277,7 +1289,7 @@ public class Dialogue implements Listener {
                             })
                             .open(player)
             );}
-            if (typeChange < AGENT_EDIT_NUM) {
+            if (AgentPermissions.canEditTypeMenu(player) && typeChange < AGENT_EDIT_NUM) {
                 sendComponent(
                         player,
                         "&8" + BULLET + " &rEntity Type",
@@ -1285,13 +1297,25 @@ public class Dialogue implements Listener {
                         l -> {
                             this.spigotCallback.clearCallbacks(player);
                             Utils.msgNoPrefix(player, "&lClick what type you want me to be:", "");
+                            boolean offeredType = false;
                             for (EntityType type : AgentEntityTypes.selectableAgentTypes()) {
+                                if (!AgentPermissions.canEditEntityType(player, type)) {
+                                    continue;
+                                }
+                                offeredType = true;
                                 String label = StringUtils.capitalize(type.name().toLowerCase());
                                 sendComponent(
                                         player,
                                         "&8" + BULLET + " &r" + label,
                                         "&aClick here to become \"&r" + label + "&a\"",
                                         m -> this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Edit"), id -> {
+                                            if (!AgentPermissions.canEditEntityType(player, type)) {
+                                                AgentPermissions.deny(player, type == EntityType.PLAYER
+                                                        ? AgentPermissions.EDIT_TYPE
+                                                        : AgentPermissions.EDIT_TYPE_ANIMAL);
+                                                this.spigotCallback.clearCallbacks(player);
+                                                return;
+                                            }
                                             NPC npc = plugin.getAgents().get(player.getName());
                                             if (npc == null) {
                                                 player.sendMessage("You need to have an AI friend first. Please try again");
@@ -1331,6 +1355,9 @@ public class Dialogue implements Listener {
                                             this.spigotCallback.clearCallbacks(player);
                                         })
                                 );
+                            }
+                            if (!offeredType) {
+                                Utils.msgNoPrefix(player, "&cYou do not have permission to change entity type.");
                             }
                             sendBackOption(this::openEditMenu);
                         }

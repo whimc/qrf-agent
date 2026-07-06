@@ -27,9 +27,27 @@ journey:
   worldguard-table-prefix: rg_
 agent_type: scientist_casual
 
+# Builder templates, rebuild NPC, and "I want to build something!" dialogue option.
+builder:
+  enabled: false
+
 # Player spawn: /agent spawn player --url <https://direct-png-link> <name> (uses Citizens/Mineskin, like /npc skin --url)
 agent-spawn:
   allow-url-skins: true
+# Non-player entity types allowed for mob agents (spawn + edit menu). PLAYER is always available and must not be listed here.
+# Use Bukkit EntityType enum names (e.g. AXOLOTL, PIG). Unknown or invalid entries are skipped at load with a warning.
+agent-mob-types:
+  - AXOLOTL
+  - OCELOT
+  - TURTLE
+  - SHEEP
+  - PIG
+  - STRIDER
+  - SNIFFER
+  - NAUTILUS
+  - HAPPY_GHAST
+  - BEE
+  - PARROT
 # Blocks above ground for non-player agent mobs (no gravity + height lock). Player-shaped agents ignore this. Use 0 to disable vertical tracking (only no-gravity).
 agent-non-player-hover-height: 2.0
 # Multiplier applied to Citizens navigator speed for non-player agents (1.0 = default mob follow speed). Higher = faster when hovering/following.
@@ -46,9 +64,15 @@ agent-player-nav-stationary-ticks: 1200
 agent-follow-catch-up-distance: 16.0
 # Blocks to the side of the player when catch-up teleporting.
 agent-follow-catch-up-offset: 1.5
-# Mob agents (hovering): tighter path range and margin so they keep up while floating.
-agent-mob-follow-path-range: 5
-agent-mob-follow-margin: 1.25
+# Mob agents (hovering): preferred horizontal distance behind the player while floating.
+agent-mob-follow-distance: 3.5
+# Blocks per tick for mob glide speed (Paper velocity cap applies).
+agent-mob-follow-speed: 0.32
+# Stop gliding when within this distance of the follow target.
+agent-mob-follow-stop-distance: 0.35
+# Mob agents (hovering): navigator safety settings (movement is handled by AgentPermanentFlyingTrait).
+agent-mob-follow-path-range: 24
+agent-mob-follow-margin: 3.0
 # LLM chat: provider + API key (or api-key-env). Requires outbound HTTPS for cloud providers; local uses llm.base-url.
 llm:
   use-for-reply: false

@@ -20,9 +20,11 @@ import java.util.stream.Collectors;
  */
 public class AgentCommand implements CommandExecutor, TabCompleter {
 
+    private final OverworldAgent plugin;
     private final Map<String, AbstractSubCommand> subCommands = new HashMap<>();
 
     public AgentCommand(OverworldAgent plugin) {
+        this.plugin = plugin;
         String base = "agent";
         subCommands.put("chat", new ChatCommand(plugin, base, "chat"));
         subCommands.put("spawn", plugin.getExpertSpawnCommand());
@@ -57,13 +59,17 @@ public class AgentCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 0) {
-            return subCommands.keySet().stream().sorted().collect(Collectors.toList());
+            return subCommands.keySet().stream()
+                    .filter(v -> !v.equals("rebuilderspawn") || plugin.isBuilderEnabled())
+                    .sorted()
+                    .collect(Collectors.toList());
         }
 
         if (args.length == 1) {
             return subCommands.keySet()
                     .stream()
                     .filter(v -> v.startsWith(args[0].toLowerCase()))
+                    .filter(v -> !v.equals("rebuilderspawn") || plugin.isBuilderEnabled())
                     .sorted()
                     .collect(Collectors.toList());
         }

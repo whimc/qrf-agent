@@ -16,3 +16,7 @@ log/
 target/
 /bin/
 dependency-reduced-pom.xml
+
+# Local dev (portable JDK, downloaded release JARs)
+.jdk/
+dev/

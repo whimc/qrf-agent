@@ -1,7 +1,6 @@
 package edu.whimc.overworld_agent.traits;
 
 import edu.whimc.overworld_agent.OverworldAgent;
-import net.citizensnpcs.trait.FollowTrait;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -29,9 +28,6 @@ public class AgentFollowCatchUpTrait extends net.citizensnpcs.api.trait.Trait {
             return;
         }
         tickCounter = 0;
-        if (!npc.hasTrait(FollowTrait.class) || !npc.getTrait(FollowTrait.class).isEnabled()) {
-            return;
-        }
         Player player = AgentFollowCatchUp.followedPlayer(npc);
         if (player == null) {
             return;

@@ -15,6 +15,7 @@ import edu.whimc.overworld_agent.dialoguetemplate.models.llm.LlmProviderFactory;
 import edu.whimc.overworld_agent.dialoguetemplate.models.llm.LlmRagContextBuilder;
 import edu.whimc.overworld_agent.dialoguetemplate.models.llm.WorldLlmPromptRegistry;
 import edu.whimc.overworld_agent.dialoguetemplate.models.BuildTemplate;
+import edu.whimc.overworld_agent.utils.AgentEntityTypes;
 import edu.whimc.overworld_agent.utils.sql.Queryer;
 
 import org.bukkit.Bukkit;
@@ -78,6 +79,7 @@ public class OverworldAgent extends JavaPlugin {
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        AgentEntityTypes.load(this);
         //receiver = (SpeechReceiver) Bukkit.getServer().getPluginManager().getPlugin("SpeechReceiver");
         sessions = new HashMap<>();
         buildTemplates = new HashMap<>();
@@ -118,6 +120,8 @@ public class OverworldAgent extends JavaPlugin {
         AgentCommand agentCommand = new AgentCommand(this);
         getCommand("agent").setExecutor(agentCommand);
         getCommand("agent").setTabCompleter(agentCommand);
+
+        edu.whimc.overworld_agent.utils.AgentPermissions.register();
 
         HabitatAssessCommand assessCommand = new HabitatAssessCommand(this);
         getCommand("assess-habitat").setExecutor(assessCommand);
@@ -212,6 +216,11 @@ public class OverworldAgent extends JavaPlugin {
 
     public Map<String, NPC> getAgents(){return agents;}
 
+    /** When false, hides builder dialogue options and blocks {@code /agent rebuilderspawn}. */
+    public boolean isBuilderEnabled() {
+        return getConfig().getBoolean("builder.enabled", false);
+    }
+
     public void removeAgents(){
         agents = new HashMap<>();
     }
@@ -219,6 +228,80 @@ public class OverworldAgent extends JavaPlugin {
     public void removeAgent(String playerName){
         agents.remove(playerName);
     }
+
+    /**
+     * Permanently removes every Citizens NPC assigned to {@code playerName} and drops them from {@link #agents}.
+     * Destroy must clear Citizens persistence, not just the in-memory map, or {@link #relinkOwnedAgent} will
+     * resurrect the agent on the next login.
+     */
+    public void destroyOwnedAgent(String playerName) {
+        if (playerName == null || playerName.isBlank()) {
+            return;
+        }
+        agents.remove(playerName);
+        List<NPC> snapshot = new ArrayList<>();
+        for (NPC npc : CitizensAPI.getNPCRegistry()) {
+            snapshot.add(npc);
+        }
+        for (NPC npc : snapshot) {
+            if (!playerName.equalsIgnoreCase(resolveNpcOwnerName(npc))) {
+                continue;
+            }
+            destroyCitizensNpc(npc);
+        }
+    }
+
+    /** Removes all player-owned agent NPCs from Citizens and clears {@link #agents}. */
+    public void destroyAllOwnedAgents() {
+        for (String owner : new ArrayList<>(agents.keySet())) {
+            destroyOwnedAgent(owner);
+        }
+        List<NPC> snapshot = new ArrayList<>();
+        for (NPC npc : CitizensAPI.getNPCRegistry()) {
+            snapshot.add(npc);
+        }
+        for (NPC npc : snapshot) {
+            if (resolveNpcOwnerName(npc) != null) {
+                destroyCitizensNpc(npc);
+            }
+        }
+        agents.clear();
+    }
+
+    private static void destroyCitizensNpc(NPC npc) {
+        if (npc == null) {
+            return;
+        }
+        try {
+            if (npc.isSpawned()) {
+                npc.despawn();
+            }
+            npc.destroy();
+        } catch (Exception ex) {
+            JavaPlugin.getPlugin(OverworldAgent.class).getLogger().warning(
+                    "Failed to destroy agent NPC " + npc.getId() + ": " + ex.getMessage());
+        }
+    }
+
+    /** @return owning player name for guide/builder agent NPCs, or null */
+    public static String resolveNpcOwnerName(NPC npc) {
+        if (npc == null) {
+            return null;
+        }
+        if (npc.hasTrait(SpawnExpertTrait.class)) {
+            return npc.getOrAddTrait(SpawnExpertTrait.class).getAssignedPlayerName();
+        }
+        if (npc.hasTrait(SpawnNoviceTrait.class)) {
+            SpawnNoviceTrait trait = npc.getTrait(SpawnNoviceTrait.class);
+            return trait != null ? trait.getAssignedPlayerName() : null;
+        }
+        if (npc.hasTrait(RebuilderTrait.class)) {
+            RebuilderTrait trait = npc.getTrait(RebuilderTrait.class);
+            return trait != null ? trait.getTargetPlayerName() : null;
+        }
+        return null;
+    }
+
     public SignMenuFactory getSignMenuFactory(){return signMenuFactory; }
 
     public ChatTextInputFactory getChatTextInputFactory() {
@@ -302,26 +385,10 @@ public class OverworldAgent extends JavaPlugin {
             return;
         }
         for (NPC npc : CitizensAPI.getNPCRegistry()) {
-            if (npc.hasTrait(SpawnExpertTrait.class)) {
-                SpawnExpertTrait t = npc.getOrAddTrait(SpawnExpertTrait.class);
-                if (name.equals(t.getAssignedPlayerName())) {
-                    agents.put(name, npc);
-                    return;
-                }
-            }
-            if (npc.hasTrait(SpawnNoviceTrait.class)) {
-                SpawnNoviceTrait t = npc.getTrait(SpawnNoviceTrait.class);
-                if (t != null && name.equals(t.getAssignedPlayerName())) {
-                    agents.put(name, npc);
-                    return;
-                }
-            }
-            if (npc.hasTrait(RebuilderTrait.class)) {
-                RebuilderTrait t = npc.getTrait(RebuilderTrait.class);
-                if (t != null && name.equals(t.getTargetPlayerName())) {
-                    agents.put(name, npc);
-                    return;
-                }
+            String owner = resolveNpcOwnerName(npc);
+            if (owner != null && name.equalsIgnoreCase(owner)) {
+                agents.put(name, npc);
+                return;
             }
         }
     }

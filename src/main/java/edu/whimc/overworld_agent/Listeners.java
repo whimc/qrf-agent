@@ -80,7 +80,7 @@ public class Listeners  implements Listener {
         plugin.relinkOwnedAgent(player);
         Map<String, NPC> agents = plugin.getAgents();
         NPC npc = agents.get(player.getName());
-        if(npc != null) {
+        if (npc != null) {
             npc.getOrAddTrait(AgentPermanentFlyingTrait.class);
             npc.getOrAddTrait(AgentFollowCatchUpTrait.class);
             npc.spawn(player.getLocation());

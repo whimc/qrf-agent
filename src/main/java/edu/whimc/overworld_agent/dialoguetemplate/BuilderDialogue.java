@@ -51,6 +51,9 @@ public class BuilderDialogue {
     }
 
     public void doDialogue(){
+        if (!plugin.isBuilderEnabled()) {
+            return;
+        }
         this.spigotCallback.clearCallbacks(player);
         HashMap<Player,List<BuildTemplate>> templates = plugin.getBuildTemplates();
         Utils.msgNoPrefix(player, "&lWhat do you want to do?", "");
