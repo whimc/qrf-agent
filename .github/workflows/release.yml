@@ -32,10 +32,19 @@ jobs:
 
       - name: Bump patch version in pom.xml
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           CURRENT="$(mvn -B -ntp help:evaluate -Dexpression=project.version -q -DforceStdout)"
           IFS='.' read -r major minor patch <<< "${CURRENT//-SNAPSHOT/}"
           NEW="${major}.${minor}.$((patch + 1))"
+
+          # pom.xml can lag behind tags when release bump PRs merge on main only
+          while gh release view "v${NEW}" >/dev/null 2>&1; do
+            IFS='.' read -r major minor patch <<< "${NEW}"
+            NEW="${major}.${minor}.$((patch + 1))"
+          done
+
           echo "current=${CURRENT}" >> "$GITHUB_OUTPUT"
           echo "new=${NEW}" >> "$GITHUB_OUTPUT"
           mvn -B -ntp org.codehaus.mojo:versions-maven-plugin:2.17.1:set \
