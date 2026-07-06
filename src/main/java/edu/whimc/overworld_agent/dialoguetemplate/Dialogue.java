@@ -13,6 +13,7 @@ import edu.whimc.overworld_agent.llm.research.AgentChatResearchLogger;
 import edu.whimc.overworld_agent.llm.research.AgentChatResearchTurn;
 
 import edu.whimc.overworld_agent.utils.AgentEntityTypes;
+import edu.whimc.overworld_agent.utils.AgentPermissions;
 import edu.whimc.overworld_agent.utils.Utils;
 import edu.whimc.sciencetools.models.sciencetool.ScienceTool;
 import edu.whimc.sciencetools.models.sciencetool.ScienceToolMeasureEvent;
@@ -71,6 +72,8 @@ public class Dialogue implements Listener {
     private String discussionConversationId;
     private String discussionSessionId;
     private int discussionTurnIndex;
+    private DialoguePrompt builtInUnknownPrompt;
+
     public Dialogue(OverworldAgent plugin, Player player, boolean text, boolean embodied) {
         this.spigotCallback = plugin.getSpigotCallback();
         this.plugin = plugin;
@@ -115,8 +118,13 @@ public class Dialogue implements Listener {
         Object manager = journeyPublicWaypointManager();
         Object waypoint = manager == null ? null : invokeGetWaypoint(manager, nameId);
         String displayName = waypoint == null ? null : extractWaypointName(waypoint);
+        if (displayName == null && manager != null && waypoint != null) {
+            displayName = lookupPublicWaypointDisplayName(manager, nameId);
+        }
         Integer waypointDomain = waypoint == null ? null : waypointCellDomain(waypoint);
         Integer playerDomain = journeyDomainForWorldSafe(player.getWorld());
+        boolean preferApi = !"command".equalsIgnoreCase(StringUtils.trimToEmpty(
+                cfg.getString("journey.dispatch-command", "auto")));
 
         String journeyRoot = cfg.getString("journey.journey-command-root", "journey");
         String journeytoRoot = StringUtils.trimToEmpty(cfg.getString("journey.journeyto-command-root", "jt"));
@@ -147,20 +155,22 @@ public class Dialogue implements Listener {
                             + player.getWorld().getName());
         }
 
-        plugin.getLogger().info(
-                "[OverworldAgent][Journey] dispatch as player "
-                        + player.getName()
-                        + ": /"
-                        + primaryCmd
-                        + (commands.size() > 1 ? " (fallbacks: " + commands.subList(1, commands.size()) + ")" : "")
-                        + " (nameId="
-                        + nameId
-                        + ", raw="
-                        + rawDestination
-                        + ", dispatch-command="
-                        + cfg.getString("journey.dispatch-command", "auto")
-                        + ")");
-        Runnable runDispatch = () -> {
+        if (!(preferApi && waypoint != null)) {
+            plugin.getLogger().info(
+                    "[OverworldAgent][Journey] dispatch as player "
+                            + player.getName()
+                            + ": /"
+                            + primaryCmd
+                            + (commands.size() > 1 ? " (fallbacks: " + commands.subList(1, commands.size()) + ")" : "")
+                            + " (nameId="
+                            + nameId
+                            + ", raw="
+                            + rawDestination
+                            + ", dispatch-command="
+                            + cfg.getString("journey.dispatch-command", "auto")
+                            + ")");
+        }
+        Runnable runCommandDispatch = () -> {
             Throwable lastError = null;
             for (int attempt = 0; attempt < commands.size(); attempt++) {
                 String cmd = commands.get(attempt);
@@ -211,10 +221,15 @@ public class Dialogue implements Listener {
                         ChatColor.RED + "Journey did not run that command. Try /" + primaryCmd + " manually.");
             }
         };
+        if (preferApi && waypoint != null) {
+            boolean debug = cfg.getBoolean("journey.debug-log", false);
+            JourneyNavigationHelper.scheduleNavigation(plugin, player, nameId, plugin.getLogger(), debug, runCommandDispatch);
+            return;
+        }
         if (Bukkit.isPrimaryThread()) {
-            runDispatch.run();
+            runCommandDispatch.run();
         } else {
-            Bukkit.getScheduler().runTask(plugin, runDispatch);
+            Bukkit.getScheduler().runTask(plugin, runCommandDispatch);
         }
     }
 
@@ -384,6 +399,10 @@ public class Dialogue implements Listener {
     private static Integer waypointCellDomain(Object waypoint) {
         if (waypoint == null) {
             return null;
+        }
+        Integer direct = cellDomainIndex(waypoint);
+        if (direct != null) {
+            return direct;
         }
         Object cell = null;
         for (String accessor : new String[] {"location", "cell", "getLocation", "getCell"}) {
@@ -607,9 +626,34 @@ public class Dialogue implements Listener {
         }
     }
 
+    private static String lookupPublicWaypointDisplayName(Object publicWaypointManager, String nameId) {
+        if (publicWaypointManager == null || StringUtils.isBlank(nameId)) {
+            return null;
+        }
+        try {
+            Object all = publicWaypointManager.getClass().getMethod("getAll").invoke(publicWaypointManager);
+            if (all == null) {
+                return null;
+            }
+            String needle = nameId.toLowerCase(Locale.ROOT);
+            for (Object item : flattenWaypointContainer(all)) {
+                String label = extractWaypointName(item);
+                String key = resolveNameIdForWaypoint(publicWaypointManager, item, label);
+                if (needle.equals(key)) {
+                    return StringUtils.isNotBlank(label) ? label : nameId;
+                }
+            }
+        } catch (ReflectiveOperationException ignored) {
+        }
+        return null;
+    }
+
     private static Object extractWaypointCell(Object waypoint) {
         if (waypoint == null) {
             return null;
+        }
+        if (cellCoords(waypoint) != null) {
+            return waypoint;
         }
         for (String accessor : new String[] {"location", "cell", "getLocation", "getCell"}) {
             try {
@@ -1073,20 +1117,26 @@ public class Dialogue implements Listener {
                 });
 
         //Agent Build option (templates + base feedback; merged from the old chat_type Builder menu)
-        String buildResponse = cfg.getString("template-gui.text.build-response",
-                "&f&nI want to build something!");
-        sendComponent(
-                player,
-                "&8" + BULLET + buildResponse,
-                "&aClick here for build templates and base feedback!",
-                p -> openBuilderMenu()
-        );
+        if (plugin.isBuilderEnabled()) {
+            String buildResponse = cfg.getString("template-gui.text.build-response",
+                    "&f&nI want to build something!");
+            sendComponent(
+                    player,
+                    "&8" + BULLET + buildResponse,
+                    "&aClick here for build templates and base feedback!",
+                    p -> openBuilderMenu()
+            );
+        }
 
         Map<String, Integer> edits = plugin.getAgentEdits().get(player);
         int skinChange = edits.get("Skin");
         int nameChange = edits.get("Name");
         int typeChange = edits.getOrDefault("Type", 0);
-        if((skinChange < AGENT_EDIT_NUM || nameChange < AGENT_EDIT_NUM || typeChange < AGENT_EDIT_NUM) && embodied){
+        boolean canEditName = AgentPermissions.canEditName(player) && nameChange < AGENT_EDIT_NUM;
+        boolean canEditSkin = AgentPermissions.canEditSkin(player) && skinChange < AGENT_EDIT_NUM;
+        boolean canEditType = AgentPermissions.canEditTypeMenu(player) && typeChange < AGENT_EDIT_NUM;
+        if (embodied && AgentPermissions.canOpenEditMenu(player)
+                && (canEditName || canEditSkin || canEditType)) {
             //Agent edit Option
             sendComponent(player, "&8" + BULLET + agentEdit, "&aClick here to change me!", p -> openEditMenu());
         }
@@ -1107,6 +1157,9 @@ public class Dialogue implements Listener {
      * reusing an in-progress builder session when one exists so template state is kept.
      */
     private void openBuilderMenu() {
+        if (!plugin.isBuilderEnabled()) {
+            return;
+        }
         BuilderDialogue bd = plugin.getInProgressTemplates().get(player);
         if (bd == null) {
             bd = new BuilderDialogue(plugin, player, embodied);
@@ -1136,13 +1189,15 @@ public class Dialogue implements Listener {
         int nameChange = edits.get("Name");
         int typeChange = edits.getOrDefault("Type", 0);
         NPC ownedForEdit = plugin.getAgents().get(player.getName());
-        boolean canEditSkin = ownedForEdit != null && ownedForEdit.isSpawned() && ownedForEdit.getEntity() != null
+        boolean canEditSkin = AgentPermissions.canEditSkin(player)
+                && skinChange < AGENT_EDIT_NUM
+                && ownedForEdit != null && ownedForEdit.isSpawned() && ownedForEdit.getEntity() != null
                 && ownedForEdit.getEntity().getType() == EntityType.PLAYER;
 
         this.spigotCallback.clearCallbacks(player);
         Utils.msgNoPrefix(player, "&lClick what you want to change:", "");
 
-            if(skinChange < AGENT_EDIT_NUM && canEditSkin) {
+            if(canEditSkin) {
                 sendComponent(
                         player,
                         "&8" + BULLET + " &rSkin",
@@ -1186,7 +1241,7 @@ public class Dialogue implements Listener {
                             sendBackOption(this::openEditMenu);
                         });
             }
-            if(nameChange < AGENT_EDIT_NUM){
+            if (AgentPermissions.canEditName(player) && nameChange < AGENT_EDIT_NUM) {
             sendComponent(
                     player,
                     "&8" + BULLET + " &rName",
@@ -1234,7 +1289,7 @@ public class Dialogue implements Listener {
                             })
                             .open(player)
             );}
-            if (typeChange < AGENT_EDIT_NUM) {
+            if (AgentPermissions.canEditTypeMenu(player) && typeChange < AGENT_EDIT_NUM) {
                 sendComponent(
                         player,
                         "&8" + BULLET + " &rEntity Type",
@@ -1242,13 +1297,25 @@ public class Dialogue implements Listener {
                         l -> {
                             this.spigotCallback.clearCallbacks(player);
                             Utils.msgNoPrefix(player, "&lClick what type you want me to be:", "");
+                            boolean offeredType = false;
                             for (EntityType type : AgentEntityTypes.selectableAgentTypes()) {
+                                if (!AgentPermissions.canEditEntityType(player, type)) {
+                                    continue;
+                                }
+                                offeredType = true;
                                 String label = StringUtils.capitalize(type.name().toLowerCase());
                                 sendComponent(
                                         player,
                                         "&8" + BULLET + " &r" + label,
                                         "&aClick here to become \"&r" + label + "&a\"",
                                         m -> this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Edit"), id -> {
+                                            if (!AgentPermissions.canEditEntityType(player, type)) {
+                                                AgentPermissions.deny(player, type == EntityType.PLAYER
+                                                        ? AgentPermissions.EDIT_TYPE
+                                                        : AgentPermissions.EDIT_TYPE_ANIMAL);
+                                                this.spigotCallback.clearCallbacks(player);
+                                                return;
+                                            }
                                             NPC npc = plugin.getAgents().get(player.getName());
                                             if (npc == null) {
                                                 player.sendMessage("You need to have an AI friend first. Please try again");
@@ -1289,6 +1356,9 @@ public class Dialogue implements Listener {
                                         })
                                 );
                             }
+                            if (!offeredType) {
+                                Utils.msgNoPrefix(player, "&cYou do not have permission to change entity type.");
+                            }
                             sendBackOption(this::openEditMenu);
                         }
                 );
@@ -1296,6 +1366,41 @@ public class Dialogue implements Listener {
         sendBackOption(this::doDialogue);
     }
 
+    /**
+     * Resolves a PMML label to a configured prompt, then {@link #UNKNOWN_LABEL}, then a built-in fallback.
+     * Live servers with truncated {@code prompts} lists (missing label -2) used to NPE here during discussion.
+     */
+    private DialoguePrompt resolvePrompt(int label) {
+        DialoguePrompt configured = prompts.get(label);
+        if (configured != null) {
+            return configured;
+        }
+        if (label != UNKNOWN_LABEL) {
+            plugin.getLogger().warning(
+                    "[OverworldAgent] Missing prompts entry for label " + label + " in config.yml; using unknown.");
+        }
+        DialoguePrompt unknown = prompts.get(UNKNOWN_LABEL);
+        if (unknown != null) {
+            return unknown;
+        }
+        plugin.getLogger().warning(
+                "[OverworldAgent] Missing prompts label -2 (unknown) in config.yml; using built-in fallback.");
+        return builtInUnknownPrompt();
+    }
+
+    private DialoguePrompt builtInUnknownPrompt() {
+        if (builtInUnknownPrompt == null) {
+            Map<String, Object> entry = new HashMap<>();
+            entry.put("prompt", "unknown");
+            entry.put("tool", null);
+            entry.put(
+                    "feedback",
+                    "Sorry I am not sure about this. Try talking to me about something else or maybe ask an instructor about this feature."
+            );
+            builtInUnknownPrompt = new DialoguePrompt(entry);
+        }
+        return builtInUnknownPrompt;
+    }
 
     private void doResponse() {
         DialoguePrompt prompt = null;
@@ -1305,12 +1410,10 @@ public class Dialogue implements Listener {
             int predictedClass = (int) prediction[0];
             double certainty = prediction[1];
             if (certainty > THRESHOLD) {
-                prompt = prompts.get(predictedClass);
-                if (prompt == null) {
-                    prompt = prompts.get(UNKNOWN_LABEL);
-                    feedback = prompt.getFeedback();
-                } else {
-                    feedback = prompt.getFeedback();
+                DialoguePrompt matched = prompts.get(predictedClass);
+                prompt = matched != null ? matched : resolvePrompt(UNKNOWN_LABEL);
+                feedback = prompt.getFeedback();
+                if (matched != null) {
                     this.fillIn();
                 }
                 if (prompt.getPrompt().equalsIgnoreCase("quest")) {
@@ -1353,7 +1456,7 @@ public class Dialogue implements Listener {
                     });
                 }
             } else {
-                prompt = prompts.get(UNKNOWN_LABEL);
+                prompt = resolvePrompt(UNKNOWN_LABEL);
                 feedback = prompt.getFeedback();
 
             }

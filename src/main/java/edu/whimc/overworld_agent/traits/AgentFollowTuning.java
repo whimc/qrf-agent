@@ -21,6 +21,7 @@ public final class AgentFollowTuning {
     private static final String CFG_MOB_MARGIN = "agent-mob-follow-margin";
 
     private static final AgentFollowStuckAction PLAYER_STUCK_ACTION = new AgentFollowStuckAction();
+    private static final AgentFollowStuckAction MOB_STUCK_ACTION = new AgentFollowStuckAction();
 
     private AgentFollowTuning() {}
 
@@ -36,9 +37,18 @@ public final class AgentFollowTuning {
             if (!npc.isSpawned() || !player.isOnline()) {
                 return;
             }
-            npc.getOrAddTrait(FollowTrait.class).follow(player);
-            npc.getOrAddTrait(AgentFollowCatchUpTrait.class);
-            npc.getOrAddTrait(AgentPermanentFlyingTrait.class).applyFlyingForCurrentEntity();
+            if (npc.getEntity().getType() == EntityType.PLAYER) {
+                npc.getOrAddTrait(FollowTrait.class).follow(player);
+                npc.getOrAddTrait(AgentFollowCatchUpTrait.class);
+                npc.getOrAddTrait(AgentPermanentFlyingTrait.class).applyFlyingForCurrentEntity();
+            } else {
+                // Mob agents: custom hover follow in AgentPermanentFlyingTrait (Citizens pathing fights flight).
+                FollowTrait follow = npc.getOrAddTrait(FollowTrait.class);
+                follow.follow(null);
+                npc.getOrAddTrait(AgentFollowCatchUpTrait.class);
+                npc.getOrAddTrait(AgentPermanentFlyingTrait.class).applyFlyingForCurrentEntity();
+                applyForCurrentEntity(plugin, npc);
+            }
         });
     }
 
@@ -71,13 +81,16 @@ public final class AgentFollowTuning {
             npc.getNavigator().getLocalParameters().stuckAction(PLAYER_STUCK_ACTION);
             ft.setFollowingMargin(margin);
         } else {
-            float range = (float) plugin.getConfig().getDouble(CFG_MOB_RANGE, 5);
-            double margin = plugin.getConfig().getDouble(CFG_MOB_MARGIN, 1.25);
+            float range = (float) plugin.getConfig().getDouble(CFG_MOB_RANGE, 24);
+            double margin = plugin.getConfig().getDouble(CFG_MOB_MARGIN, 3.0);
             npc.getNavigator().getDefaultParameters().range(range);
             npc.getNavigator().getLocalParameters().range(range);
-            // Hovering mobs: switch to direct steering sooner so pathfinding does not leave them sliding in XZ at the wrong Y.
-            npc.getNavigator().getDefaultParameters().straightLineTargetingDistance(Math.min(range, 6.0f));
-            npc.getNavigator().getLocalParameters().straightLineTargetingDistance(Math.min(range, 6.0f));
+            npc.getNavigator().getDefaultParameters().destinationTeleportMargin(-1);
+            npc.getNavigator().getLocalParameters().destinationTeleportMargin(-1);
+            npc.getNavigator().getDefaultParameters().stuckAction(MOB_STUCK_ACTION);
+            npc.getNavigator().getLocalParameters().stuckAction(MOB_STUCK_ACTION);
+            npc.getNavigator().getDefaultParameters().straightLineTargetingDistance(0);
+            npc.getNavigator().getLocalParameters().straightLineTargetingDistance(0);
             ft.setFollowingMargin(margin);
         }
     }

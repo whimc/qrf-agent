@@ -29,21 +29,116 @@ public final class AgentFollowCatchUp {
     }
 
     /**
-     * @return the player this agent is following, or null
+     * @return the player this agent is assigned to / following, or null
      */
     public static Player followedPlayer(NPC npc) {
-        if (npc == null || !npc.hasTrait(FollowTrait.class)) {
+        if (npc == null) {
             return null;
         }
-        FollowTrait follow = npc.getTrait(FollowTrait.class);
-        if (!follow.isEnabled()) {
-            return null;
+        if (npc.hasTrait(FollowTrait.class)) {
+            FollowTrait follow = npc.getTrait(FollowTrait.class);
+            if (follow.isEnabled()) {
+                Entity entity = follow.getFollowing();
+                if (entity instanceof Player player && player.isOnline()) {
+                    return player;
+                }
+            }
         }
-        Entity entity = follow.getFollowing();
-        if (entity instanceof Player player && player.isOnline()) {
-            return player;
+        if (npc.hasTrait(edu.whimc.overworld_agent.traits.SpawnExpertTrait.class)) {
+            String name = npc.getOrAddTrait(edu.whimc.overworld_agent.traits.SpawnExpertTrait.class)
+                    .getAssignedPlayerName();
+            if (name != null) {
+                Player player = org.bukkit.Bukkit.getPlayerExact(name);
+                if (player != null && player.isOnline()) {
+                    return player;
+                }
+            }
         }
         return null;
+    }
+
+    /**
+     * Spawn location for hovering mob agents: same settle point as {@link #mobFollowTarget} (front-side when idle).
+     */
+    public static Location mobSpawnLocation(OverworldAgent plugin, Player player) {
+        Location spot = mobFollowTarget(plugin, player, 0.6);
+        return spot != null ? spot : player.getLocation();
+    }
+
+    /** Sets Y to {@code surface + hover} for a mob agent at this X/Z. */
+    public static Location withMobHoverHeight(OverworldAgent plugin, Location location, double entityHeight) {
+        if (location == null || location.getWorld() == null) {
+            return location;
+        }
+        double hover = plugin.getConfig().getDouble("agent-non-player-hover-height", 2.0);
+        if (hover <= 0) {
+            return location;
+        }
+        double surfaceY = surfaceYBelow(location.getWorld(), location, entityHeight);
+        location.setY(surfaceY + hover);
+        return location;
+    }
+
+    /**
+     * Horizontal follow point for hovering mob agents. When the owner is idle, the mob settles in
+     * front of their view (slightly to the side) so it stays clickable; while moving, it trails behind.
+     */
+    public static Location mobFollowTarget(OverworldAgent plugin, Player player, double entityHeight) {
+        if (player == null || !player.isOnline()) {
+            return null;
+        }
+        double followDistance = plugin.getConfig().getDouble("agent-mob-follow-distance", 3.5);
+        double sideOffset = plugin.getConfig().getDouble("agent-mob-idle-side-offset", 1.5);
+        double idleSpeed = plugin.getConfig().getDouble("agent-mob-idle-settle-speed", 0.08);
+        double hover = plugin.getConfig().getDouble("agent-non-player-hover-height", 2.0);
+
+        Location base = player.getLocation();
+        Vector forward = base.getDirection();
+        forward.setY(0);
+        if (forward.lengthSquared() < 1.0E-4) {
+            forward = new Vector(0, 0, 1);
+        }
+        forward.normalize();
+        Vector right = new Vector(-forward.getZ(), 0, forward.getX()).normalize();
+
+        Location spot;
+        if (isPlayerHorizontallyIdle(player, idleSpeed)) {
+            spot = base.clone()
+                    .add(forward.clone().multiply(followDistance))
+                    .add(right.clone().multiply(sideOffset));
+        } else {
+            spot = base.clone().subtract(forward.multiply(followDistance));
+        }
+        if (hover <= 0) {
+            return spot;
+        }
+        return withMobHoverHeight(plugin, spot, entityHeight);
+    }
+
+    /** True when the owner is not moving horizontally (standing still, looking around). */
+    private static boolean isPlayerHorizontallyIdle(Player player, double maxHorizontalSpeed) {
+        if (player.isGliding() || player.isRiptiding() || player.isFlying()) {
+            return false;
+        }
+        if (player.getVehicle() != null) {
+            return false;
+        }
+        Vector velocity = player.getVelocity();
+        double horizontal = Math.hypot(velocity.getX(), velocity.getZ());
+        return horizontal <= maxHorizontalSpeed;
+    }
+
+    private static double surfaceYBelow(World world, Location feet, double entityHeight) {
+        double clearance = Math.max(1.0, entityHeight * 0.95);
+        double startY = Math.min(feet.getY() + clearance, world.getMaxHeight() - 1.0);
+        Location start = new Location(world, feet.getX(), startY, feet.getZ());
+        double maxLen = Math.max(2.0, startY - world.getMinHeight() + 4.0);
+        org.bukkit.util.RayTraceResult hit = world.rayTraceBlocks(
+                start, new Vector(0, -1, 0), maxLen, org.bukkit.FluidCollisionMode.NEVER, true);
+        if (hit != null && hit.getHitBlock() != null) {
+            return hit.getHitBlock().getY() + 1.0;
+        }
+        return world.getHighestBlockYAt(feet) + 1.0;
     }
 
     /**
@@ -62,9 +157,25 @@ public final class AgentFollowCatchUp {
 
         double catchUp = catchUpDistance(plugin);
         double horizontal = horizontalDistance(agentLoc, playerLoc);
+        if (horizontal < 0.75) {
+            nudgeOffPlayer(plugin, npc, player);
+            return;
+        }
         if (horizontal > catchUp) {
             teleportBeside(plugin, npc, player);
         }
+    }
+
+    /** Reposition mob agents that Citizens stacked on the owner's head. */
+    private static void nudgeOffPlayer(OverworldAgent plugin, NPC npc, Player player) {
+        if (npc == null || player == null || !npc.isSpawned() || npc.getEntity() == null) {
+            return;
+        }
+        if (npc.getEntity().getType() == org.bukkit.entity.EntityType.PLAYER) {
+            return;
+        }
+        Location dest = mobSpawnLocation(plugin, player);
+        npc.teleport(dest, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
     }
 
     public static void teleportBeside(OverworldAgent plugin, NPC npc, Player player) {
@@ -74,6 +185,10 @@ public final class AgentFollowCatchUp {
         Location dest = besidePlayer(player, besideOffset(plugin));
         if (dest == null) {
             return;
+        }
+        if (npc.isSpawned() && npc.getEntity() != null
+                && npc.getEntity().getType() != org.bukkit.entity.EntityType.PLAYER) {
+            dest = withMobHoverHeight(plugin, dest, npc.getEntity().getHeight());
         }
         if (!npc.isSpawned()) {
             npc.spawn(dest);

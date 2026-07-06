@@ -1,6 +1,7 @@
 package edu.whimc.overworld_agent.commands;
 
 import edu.whimc.overworld_agent.OverworldAgent;
+import edu.whimc.overworld_agent.utils.AgentPermissions;
 import edu.whimc.overworld_agent.utils.Utils;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -89,7 +90,8 @@ public abstract class AbstractSubCommand {
     }
 
     public List<String> executeOnTabComplete(CommandSender sender, String[] args) {
-        if (!sender.hasPermission(getPermission()) || args.length > this.maxArgs) {
+        if ((!AgentPermissions.bypassesRestrictions(sender) && !sender.hasPermission(getPermission()))
+                || args.length > this.maxArgs) {
             return Arrays.asList();
         }
         return onTabComplete(sender, args);
@@ -133,7 +135,7 @@ public abstract class AbstractSubCommand {
     protected abstract boolean onCommand(CommandSender sender, String[] args);
 
     public boolean executeSubCommand(CommandSender sender, String[] args) {
-        if (!sender.hasPermission(getPermission())) {
+        if (!AgentPermissions.bypassesRestrictions(sender) && !sender.hasPermission(getPermission())) {
             Utils.msg(sender,
                     "&cYou do not have the required permission!",
                     "  &f&o" + getPermission().getName());

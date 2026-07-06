@@ -3,9 +3,11 @@ package edu.whimc.overworld_agent.commands.subcommands;
 import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.commands.AbstractSubCommand;
 import edu.whimc.overworld_agent.utils.AgentEntityTypes;
+import edu.whimc.overworld_agent.utils.AgentPermissions;
 import edu.whimc.overworld_agent.utils.CitizensSkinUrls;
-import edu.whimc.overworld_agent.traits.AgentFollowCatchUpTrait;
+import edu.whimc.overworld_agent.traits.AgentFollowCatchUp;
 import edu.whimc.overworld_agent.traits.AgentFollowTuning;
+import edu.whimc.overworld_agent.traits.AgentFollowCatchUpTrait;
 import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import edu.whimc.overworld_agent.traits.SpawnExpertTrait;
 import net.citizensnpcs.api.CitizensAPI;
@@ -13,10 +15,12 @@ import net.citizensnpcs.api.npc.NPC;
 import net.citizensnpcs.api.npc.NPCRegistry;
 import net.citizensnpcs.trait.LookClose;
 import net.citizensnpcs.trait.SkinTrait;
+import org.bukkit.Location;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
+import org.bukkit.permissions.PermissionDefault;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -31,12 +35,12 @@ import java.util.stream.Collectors;
 public class ExpertSpawnCommand extends AbstractSubCommand {
 
     private static final String COMMAND = "expert";
-    private static final List<String> ANIMAL_ENTITY_NAMES = AgentEntityTypes.animalNamesLowercaseSorted();
 
     public ExpertSpawnCommand(OverworldAgent plugin, String baseCommand, String subCommand) {
-        super(plugin, baseCommand, subCommand);
+        super(plugin, baseCommand, subCommand, PermissionDefault.TRUE);
         super.description("Spawns an agent to follow sender with specified entity type/skin and name");
         super.arguments("[entityType] [skinName | --url <https://...>] agentName");
+        super.requiresPlayer();
     }
 
     @Override
@@ -53,6 +57,15 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
 
         SpawnRequest request = parseSpawnRequest(player, args);
         if (request == null) {
+            return true;
+        }
+
+        if (!AgentPermissions.canSpawnEntityType(player, request.entityType())) {
+            if (request.entityType() == EntityType.PLAYER) {
+                AgentPermissions.deny(player, AgentPermissions.SPAWN_PLAYER);
+            } else {
+                AgentPermissions.deny(player, AgentPermissions.SPAWN_ANIMAL);
+            }
             return true;
         }
 
@@ -251,7 +264,10 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
     private void finishSpawn(Player player, NPC npc, String npcName, EntityType entityType, String agentSkinOrType) {
         String storedAppearance = entityType == EntityType.PLAYER ? agentSkinOrType : entityType.name();
         plugin.getQueryer().storeNewAgent(player, COMMAND, npcName, storedAppearance, id -> {
-            npc.spawn(player.getLocation());
+            Location spawnAt = entityType == EntityType.PLAYER
+                    ? player.getLocation()
+                    : AgentFollowCatchUp.mobSpawnLocation(plugin, player);
+            npc.spawn(spawnAt);
             AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
             plugin.getAgents().put(player.getName(), npc);
         });
@@ -314,8 +330,12 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
         if (args.length == 1) {
             String prefix = args[0].toLowerCase(Locale.ROOT);
             List<String> entityOpts = new ArrayList<>();
-            entityOpts.add("player");
-            entityOpts.addAll(ANIMAL_ENTITY_NAMES);
+            if (AgentPermissions.canSpawnPlayer(sender)) {
+                entityOpts.add("player");
+            }
+            if (AgentPermissions.canSpawnAnimal(sender)) {
+                entityOpts.addAll(AgentEntityTypes.animalNamesLowercaseSorted());
+            }
             return entityOpts.stream()
                     .filter(v -> v.startsWith(prefix))
                     .collect(Collectors.toList());

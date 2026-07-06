@@ -73,6 +73,11 @@ public class RebuilderTrait extends Trait {
         Player sender = event.getClicker();
         if(sender == Bukkit.getPlayer(target)) {
             if (event.getNPC() == this.getNPC()) {
+                if (!plugin.isBuilderEnabled()) {
+                    Dialogue dialogue = new Dialogue(plugin, sender, true, true);
+                    dialogue.doDialogue();
+                    return;
+                }
                 if (plugin.getInProgressTemplates().containsKey(sender)) {
                     BuilderDialogue bd = plugin.getInProgressTemplates().get(sender);
                     bd.doDialogue();

@@ -46,6 +46,10 @@ public class RebuilderSpawnCommand extends AbstractSubCommand {
      */
     @Override
     protected boolean onCommand(CommandSender sender, String[] args) {
+        if (!plugin.isBuilderEnabled()) {
+            sender.sendMessage("Builder agent features are disabled on this server.");
+            return true;
+        }
         Player player;
         if (!(sender instanceof Player)) {
             sender.sendMessage("You must be a player");
