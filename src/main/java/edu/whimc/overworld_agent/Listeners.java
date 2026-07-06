@@ -1,7 +1,7 @@
 package edu.whimc.overworld_agent;
 
+import edu.whimc.overworld_agent.traits.AgentFollowCatchUp;
 import edu.whimc.overworld_agent.traits.AgentFollowCatchUpTrait;
-import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
@@ -13,6 +13,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityMountEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.util.HashMap;
@@ -78,13 +79,37 @@ public class Listeners  implements Listener {
         HashMap<Player,HashMap<String, Integer>> agentEdits = plugin.getAgentEdits();
         agentEdits.putIfAbsent(player, edits);
         plugin.relinkOwnedAgent(player);
-        Map<String, NPC> agents = plugin.getAgents();
-        NPC npc = agents.get(player.getName());
-        if (npc != null) {
+        recoverPlayerAgent(player, 1L);
+    }
+
+    /** Teleports a spawned agent after join or world change; respawns only after quit despawn. */
+    private void recoverPlayerAgent(Player player, long delayTicks) {
+        Runnable recover = () -> {
+            if (!player.isOnline()) {
+                return;
+            }
+            plugin.relinkOwnedAgent(player);
+            NPC npc = plugin.getAgents().get(player.getName());
+            if (npc == null) {
+                return;
+            }
             npc.getOrAddTrait(AgentPermanentFlyingTrait.class);
             npc.getOrAddTrait(AgentFollowCatchUpTrait.class);
-            npc.spawn(player.getLocation());
-            AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
+            if (!npc.isSpawned()) {
+                AgentFollowCatchUp.respawnBesideOwner(plugin, npc, player);
+            } else {
+                AgentFollowCatchUp.recoverIfNeeded(plugin, npc, player);
+            }
+        };
+        if (delayTicks <= 0) {
+            recover.run();
+        } else {
+            Bukkit.getScheduler().runTaskLater(plugin, recover, delayTicks);
         }
+    }
+
+    @EventHandler
+    public void onPlayerChangedWorld(PlayerChangedWorldEvent event) {
+        recoverPlayerAgent(event.getPlayer(), 5L);
     }
 }

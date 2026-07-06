@@ -4,7 +4,6 @@ import edu.whimc.overworld_agent.OverworldAgent;
 
 import edu.whimc.overworld_agent.dialoguetemplate.BuilderDialogue;
 import edu.whimc.overworld_agent.dialoguetemplate.Dialogue;
-import net.citizensnpcs.Settings;
 import net.citizensnpcs.api.persistence.Persist;
 import net.citizensnpcs.api.trait.Trait;
 import net.citizensnpcs.api.trait.trait.Equipment;
@@ -85,23 +84,6 @@ public class RebuilderTrait extends Trait {
                     BuilderDialogue bd = new BuilderDialogue(plugin, sender, true);
                     bd.doDialogue();
                 }
-            }
-        }
-    }
-
-    // Called every tick
-    @Override
-    public void run() {
-        if(npc.isSpawned() && target != null && Bukkit.getPlayer(target) != null){
-            if (!npc.getEntity().getWorld().equals(Bukkit.getPlayer(target).getWorld())) {
-                if (Settings.Setting.FOLLOW_ACROSS_WORLDS.asBoolean()) {
-                    Player follower = Bukkit.getPlayer(target);
-                    npc.despawn();
-                    npc.spawn(AgentFollowCatchUp.besidePlayer(follower, AgentFollowCatchUp.besideOffset(plugin)));
-                    AgentFollowTuning.applyForCurrentEntity(plugin, npc);
-                    AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, follower);
-                }
-                return;
             }
         }
     }

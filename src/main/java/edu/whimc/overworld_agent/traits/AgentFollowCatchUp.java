@@ -6,6 +6,7 @@ import net.citizensnpcs.trait.FollowTrait;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
@@ -17,8 +18,14 @@ public final class AgentFollowCatchUp {
 
     private static final String CFG_CATCH_UP_DISTANCE = "agent-follow-catch-up-distance";
     private static final String CFG_CATCH_UP_OFFSET = "agent-follow-catch-up-offset";
+    private static final String CFG_RECOVERY_MAX_VERTICAL = "agent-follow-recovery-max-vertical";
 
     private AgentFollowCatchUp() {}
+
+    public static int recoveryIntervalTicks(OverworldAgent plugin) {
+        double seconds = plugin.getConfig().getDouble("agent-follow-recovery-interval-seconds", 10.0);
+        return Math.max(20, (int) Math.round(seconds * 20.0));
+    }
 
     public static double catchUpDistance(OverworldAgent plugin) {
         return plugin.getConfig().getDouble(CFG_CATCH_UP_DISTANCE, 16.0);
@@ -142,8 +149,39 @@ public final class AgentFollowCatchUp {
     }
 
     /**
+     * Teleports a <em>spawned</em> agent to the owner when it is in another world or lost (void / too
+     * far). Despawned agents are intentionally left alone.
+     */
+    public static void recoverIfNeeded(OverworldAgent plugin, NPC npc, Player player) {
+        if (plugin == null || npc == null || player == null || !player.isOnline()) {
+            return;
+        }
+        if (!npc.isSpawned() || npc.getEntity() == null) {
+            return;
+        }
+        Location agentLoc = npc.getEntity().getLocation();
+        Location playerLoc = player.getLocation();
+        if (!agentLoc.getWorld().equals(playerLoc.getWorld()) || isLostFromOwner(plugin, agentLoc, playerLoc)) {
+            teleportBeside(plugin, npc, player);
+            AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
+        }
+    }
+
+    private static boolean isLostFromOwner(OverworldAgent plugin, Location agentLoc, Location playerLoc) {
+        if (horizontalDistance(agentLoc, playerLoc) > catchUpDistance(plugin)) {
+            return true;
+        }
+        double maxVertical = plugin.getConfig().getDouble(CFG_RECOVERY_MAX_VERTICAL, 32.0);
+        if (Math.abs(agentLoc.getY() - playerLoc.getY()) > maxVertical) {
+            return true;
+        }
+        World world = agentLoc.getWorld();
+        return agentLoc.getY() < world.getMinHeight() + 4;
+    }
+
+    /**
      * Teleport catch-up when horizontal distance exceeds the configured threshold, or when the agent
-     * is stacked on the player (Citizens cross-world / stuck recovery).
+     * is stacked on the player (same world only — use {@link #recoverIfNeeded} for cross-world).
      */
     public static void applyIfNeeded(OverworldAgent plugin, NPC npc, Player player) {
         if (plugin == null || npc == null || player == null || !npc.isSpawned() || npc.getEntity() == null) {
@@ -164,6 +202,28 @@ public final class AgentFollowCatchUp {
         if (horizontal > catchUp) {
             teleportBeside(plugin, npc, player);
         }
+    }
+
+    /** Despawn (if needed) and spawn beside the owner — used on login after intentional quit despawn. */
+    public static void respawnBesideOwner(OverworldAgent plugin, NPC npc, Player player) {
+        Location dest = destinationBesideOwner(plugin, npc, player);
+        if (dest == null) {
+            return;
+        }
+        if (npc.isSpawned()) {
+            npc.despawn();
+        }
+        npc.spawn(dest);
+        AgentFollowTuning.applyForCurrentEntity(plugin, npc);
+        AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
+    }
+
+    private static Location destinationBesideOwner(OverworldAgent plugin, NPC npc, Player player) {
+        if (npc != null && npc.isSpawned() && npc.getEntity() != null
+                && npc.getEntity().getType() != EntityType.PLAYER) {
+            return mobSpawnLocation(plugin, player);
+        }
+        return besidePlayer(player, besideOffset(plugin));
     }
 
     /** Reposition mob agents that Citizens stacked on the owner's head. */

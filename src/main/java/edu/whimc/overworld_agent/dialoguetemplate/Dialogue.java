@@ -14,6 +14,7 @@ import edu.whimc.overworld_agent.llm.research.AgentChatResearchTurn;
 
 import edu.whimc.overworld_agent.utils.AgentEntityTypes;
 import edu.whimc.overworld_agent.utils.AgentPermissions;
+import edu.whimc.overworld_agent.utils.CitizensSkinUrls;
 import edu.whimc.overworld_agent.utils.Utils;
 import edu.whimc.sciencetools.models.sciencetool.ScienceTool;
 import edu.whimc.sciencetools.models.sciencetool.ScienceToolMeasureEvent;
@@ -1202,44 +1203,7 @@ public class Dialogue implements Listener {
                         player,
                         "&8" + BULLET + " &rSkin",
                         "&aClick here to select \"&rskin change",
-                        l -> {
-                            this.spigotCallback.clearCallbacks(player);
-                            Utils.msgNoPrefix(player, "&lClick what skin you want me to have:", "");
-                            FileConfiguration config = plugin.getConfig();
-                            String path = "skins."+plugin.getSkinType();
-                            for (String key : config.getConfigurationSection(path).getKeys(false)) {
-                                ConfigurationSection section = config.getConfigurationSection(path + "." + key);
-                                String labelOpt = section.getString("dialogue_option");
-                                final String label = (labelOpt == null || labelOpt.isBlank()) ? key : labelOpt;
-                                String signature = section.getString("signature");
-                                String data = section.getString("data");
-                                final String skinName = key;
-                                sendComponent(
-                                        player,
-                                        "&8" + BULLET + " &r" + label,
-                                        "&aClick here to select \"&r" + label + "&a\"",
-                                        m -> {
-                                            this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Edit"), id -> {
-                                                Map<String, NPC> npcs = plugin.getAgents();
-                                                NPC npc = npcs.get(player.getName());
-                                                if (npc != null) {
-                                                    SkinTrait skinTrait = npc.getOrAddTrait(SkinTrait.class);
-                                                    skinTrait.setSkinPersistent(skinName, signature, data);
-                                                    plugin.getAgentEdits().get(player).replace("Skin",skinChange+1);
-                                                    int numLeft = AGENT_EDIT_NUM - plugin.getAgentEdits().get(player).get("Skin");
-                                                    player.sendMessage("Your agent's skin has been changed to " + label + ".\n You have " + numLeft + " skin edits left.");
-                                                    plugin.getQueryer().storeNewAgent(player, "edit", npc.getName(), skinName, id2 -> {
-                                                        plugin.getAgents().put(player.getName(), npc);
-                                                    });
-                                                } else {
-                                                    player.sendMessage("You need to have an AI friend first. Please try again");
-                                                }
-                                                this.spigotCallback.clearCallbacks(player);
-                                            });
-                                        });
-                            }
-                            sendBackOption(this::openEditMenu);
-                        });
+                        l -> openSkinSelectionMenu(skinChange));
             }
             if (AgentPermissions.canEditName(player) && nameChange < AGENT_EDIT_NUM) {
             sendComponent(
@@ -1364,6 +1328,119 @@ public class Dialogue implements Listener {
                 );
             }
         sendBackOption(this::doDialogue);
+    }
+
+    private void openSkinSelectionMenu(int skinChange) {
+        this.spigotCallback.clearCallbacks(player);
+        Utils.msgNoPrefix(player, "&lClick what skin you want me to have:", "");
+        FileConfiguration config = plugin.getConfig();
+        String path = "skins." + plugin.getSkinType();
+        ConfigurationSection skinSection = config.getConfigurationSection(path);
+        if (skinSection != null) {
+            for (String key : skinSection.getKeys(false)) {
+                ConfigurationSection section = config.getConfigurationSection(path + "." + key);
+                if (section == null) {
+                    continue;
+                }
+                String labelOpt = section.getString("dialogue_option");
+                final String label = (labelOpt == null || labelOpt.isBlank()) ? key : labelOpt;
+                String signature = section.getString("signature");
+                String data = section.getString("data");
+                final String skinName = key;
+                sendComponent(
+                        player,
+                        "&8" + BULLET + " &r" + label,
+                        "&aClick here to select \"&r" + label + "&a\"",
+                        m -> this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Edit"), id ->
+                                applyConfiguredSkinEdit(skinChange, skinName, signature, data, label)));
+            }
+        }
+        if (plugin.getConfig().getBoolean("agent-spawn.allow-url-skins", true)) {
+            sendComponent(
+                    player,
+                    "&8" + BULLET + " &rCustom URL skin",
+                    "&aPaste a direct https:// link to a .png skin image",
+                    m -> openCustomSkinUrlInput(skinChange));
+        }
+        sendBackOption(this::openEditMenu);
+    }
+
+    private void applyConfiguredSkinEdit(
+            int skinChange,
+            String skinName,
+            String signature,
+            String data,
+            String label
+    ) {
+        NPC npc = plugin.getAgents().get(player.getName());
+        if (npc == null) {
+            player.sendMessage("You need to have an AI friend first. Please try again");
+            this.spigotCallback.clearCallbacks(player);
+            return;
+        }
+        SkinTrait skinTrait = npc.getOrAddTrait(SkinTrait.class);
+        skinTrait.setSkinPersistent(skinName, signature, data);
+        finishSkinEdit(skinChange, label, skinName, npc);
+    }
+
+    private void openCustomSkinUrlInput(int skinChange) {
+        this.spigotCallback.clearCallbacks(player);
+        List<String> instruct = Arrays.asList(
+                Utils.color("&0&lCustom skin URL"),
+                "",
+                Utils.color("&7Paste a direct &fhttps:// &7link to a .png skin image in chat."));
+        plugin.getChatTextInputFactory().open(player, instruct, text -> {
+            if (StringUtils.isBlank(text)) {
+                Utils.msgNoPrefix(player, ChatColor.RED + "Please enter a URL in chat.");
+                openCustomSkinUrlInput(skinChange);
+                return;
+            }
+            String url = text.trim();
+            if (!CitizensSkinUrls.isHttpsUrl(url)) {
+                Utils.msgNoPrefix(player, ChatColor.RED + "Use a direct https:// link to a .png file.");
+                openCustomSkinUrlInput(skinChange);
+                return;
+            }
+            if (!plugin.getConfig().getBoolean("agent-spawn.allow-url-skins", true)) {
+                player.sendMessage("Custom URL skins are disabled on this server.");
+                openSkinSelectionMenu(skinChange);
+                return;
+            }
+            player.sendMessage("Fetching skin from URL...");
+            CitizensSkinUrls.fetchFromUrl(
+                    plugin,
+                    url,
+                    false,
+                    skinData -> plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Edit"), id -> {
+                        NPC npc = plugin.getAgents().get(player.getName());
+                        if (npc == null) {
+                            player.sendMessage("You need to have an AI friend first. Please try again");
+                            this.spigotCallback.clearCallbacks(player);
+                            return;
+                        }
+                        SkinTrait skinTrait = npc.getOrAddTrait(SkinTrait.class);
+                        skinTrait.setSkinPersistent(
+                                skinData.cacheId(), skinData.signature(), skinData.texture());
+                        finishSkinEdit(skinChange, "custom URL skin", skinData.cacheId(), npc);
+                    }),
+                    error -> {
+                        player.sendMessage(
+                                "Could not load skin from that URL. Use a direct https:// link to a .png file. "
+                                        + "(" + error + ")");
+                        openCustomSkinUrlInput(skinChange);
+                    }
+            );
+        });
+    }
+
+    private void finishSkinEdit(int skinChange, String label, String appearanceForDb, NPC npc) {
+        plugin.getAgentEdits().get(player).replace("Skin", skinChange + 1);
+        int numLeft = AGENT_EDIT_NUM - plugin.getAgentEdits().get(player).get("Skin");
+        player.sendMessage(
+                "Your agent's skin has been changed to " + label + ".\n You have " + numLeft + " skin edits left.");
+        plugin.getQueryer().storeNewAgent(player, "edit", npc.getName(), appearanceForDb, id2 ->
+                plugin.getAgents().put(player.getName(), npc));
+        this.spigotCallback.clearCallbacks(player);
     }
 
     /**

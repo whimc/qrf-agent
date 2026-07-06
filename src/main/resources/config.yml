@@ -64,6 +64,10 @@ agent-player-nav-stationary-ticks: 1200
 agent-follow-catch-up-distance: 16.0
 # Blocks to the side of the player when catch-up teleporting.
 agent-follow-catch-up-offset: 1.5
+# How often (seconds) to check whether a spawned agent is in another world or lost (void / too far).
+agent-follow-recovery-interval-seconds: 10
+# Same-world recovery when vertical separation exceeds this (e.g. agent fell into void below).
+agent-follow-recovery-max-vertical: 32.0
 # Mob agents (hovering): preferred horizontal distance behind the player while moving.
 agent-mob-follow-distance: 3.5
 # When the owner is stopped, mob agents settle this far in front of their view (plus side offset).

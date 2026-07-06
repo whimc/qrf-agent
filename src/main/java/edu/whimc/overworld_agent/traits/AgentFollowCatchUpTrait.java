@@ -5,14 +5,15 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
 /**
- * Periodic follow catch-up: teleports beside the owner when far behind, and nudges off the player's
- * block when Citizens snaps the agent on top (cross-world follow or stuck recovery).
+ * Periodic recovery: teleports a <em>spawned</em> agent to its owner when they are in different
+ * worlds or the agent is lost (void / too far). Interval from
+ * {@code agent-follow-recovery-interval-seconds} in config (default 10s).
  */
 public class AgentFollowCatchUpTrait extends net.citizensnpcs.api.trait.Trait {
 
-    private static final int CHECK_INTERVAL_TICKS = 10;
     private final OverworldAgent plugin;
     private int tickCounter;
+    private int checkIntervalTicks = -1;
 
     public AgentFollowCatchUpTrait() {
         super("agentfollowcatchup");
@@ -21,17 +22,18 @@ public class AgentFollowCatchUpTrait extends net.citizensnpcs.api.trait.Trait {
 
     @Override
     public void run() {
-        if (!npc.isSpawned() || npc.getEntity() == null) {
-            return;
+        if (checkIntervalTicks < 0) {
+            checkIntervalTicks = AgentFollowCatchUp.recoveryIntervalTicks(plugin);
         }
-        if (++tickCounter < CHECK_INTERVAL_TICKS) {
+        if (++tickCounter < checkIntervalTicks) {
             return;
         }
         tickCounter = 0;
+        checkIntervalTicks = AgentFollowCatchUp.recoveryIntervalTicks(plugin);
         Player player = AgentFollowCatchUp.followedPlayer(npc);
-        if (player == null) {
+        if (player == null || !player.isOnline()) {
             return;
         }
-        AgentFollowCatchUp.applyIfNeeded(plugin, npc, player);
+        AgentFollowCatchUp.recoverIfNeeded(plugin, npc, player);
     }
 }
