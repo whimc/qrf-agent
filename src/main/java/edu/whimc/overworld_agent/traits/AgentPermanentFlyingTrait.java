@@ -12,8 +12,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.util.Vector;
 
 /**
- * Non-{@link EntityType#PLAYER} agents use no gravity and glide toward a hover point behind their
- * owner. Player-shaped agents use normal gravity and walking (unchanged).
+ * Non-{@link EntityType#PLAYER} agents use no gravity and glide toward a hover point near their
+ * owner (in front when idle, behind while moving). Player-shaped agents use normal gravity and walking (unchanged).
  */
 public class AgentPermanentFlyingTrait extends Trait {
 

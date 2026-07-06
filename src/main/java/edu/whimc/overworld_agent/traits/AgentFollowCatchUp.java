@@ -58,14 +58,11 @@ public final class AgentFollowCatchUp {
     }
 
     /**
-     * Spawn location for hovering mob agents: beside the owner at configured hover height.
+     * Spawn location for hovering mob agents: same settle point as {@link #mobFollowTarget} (front-side when idle).
      */
     public static Location mobSpawnLocation(OverworldAgent plugin, Player player) {
-        Location beside = besidePlayer(player, besideOffset(plugin));
-        if (beside == null) {
-            return player.getLocation();
-        }
-        return withMobHoverHeight(plugin, beside, 0.6);
+        Location spot = mobFollowTarget(plugin, player, 0.6);
+        return spot != null ? spot : player.getLocation();
     }
 
     /** Sets Y to {@code surface + hover} for a mob agent at this X/Z. */
@@ -83,13 +80,16 @@ public final class AgentFollowCatchUp {
     }
 
     /**
-     * Horizontal follow point behind the player for hovering mob agents.
+     * Horizontal follow point for hovering mob agents. When the owner is idle, the mob settles in
+     * front of their view (slightly to the side) so it stays clickable; while moving, it trails behind.
      */
     public static Location mobFollowTarget(OverworldAgent plugin, Player player, double entityHeight) {
         if (player == null || !player.isOnline()) {
             return null;
         }
         double followDistance = plugin.getConfig().getDouble("agent-mob-follow-distance", 3.5);
+        double sideOffset = plugin.getConfig().getDouble("agent-mob-idle-side-offset", 1.5);
+        double idleSpeed = plugin.getConfig().getDouble("agent-mob-idle-settle-speed", 0.08);
         double hover = plugin.getConfig().getDouble("agent-non-player-hover-height", 2.0);
 
         Location base = player.getLocation();
@@ -99,12 +99,33 @@ public final class AgentFollowCatchUp {
             forward = new Vector(0, 0, 1);
         }
         forward.normalize();
+        Vector right = new Vector(-forward.getZ(), 0, forward.getX()).normalize();
 
-        Location spot = base.clone().subtract(forward.multiply(followDistance));
+        Location spot;
+        if (isPlayerHorizontallyIdle(player, idleSpeed)) {
+            spot = base.clone()
+                    .add(forward.clone().multiply(followDistance))
+                    .add(right.clone().multiply(sideOffset));
+        } else {
+            spot = base.clone().subtract(forward.multiply(followDistance));
+        }
         if (hover <= 0) {
             return spot;
         }
         return withMobHoverHeight(plugin, spot, entityHeight);
+    }
+
+    /** True when the owner is not moving horizontally (standing still, looking around). */
+    private static boolean isPlayerHorizontallyIdle(Player player, double maxHorizontalSpeed) {
+        if (player.isGliding() || player.isRiptiding() || player.isFlying()) {
+            return false;
+        }
+        if (player.getVehicle() != null) {
+            return false;
+        }
+        Vector velocity = player.getVelocity();
+        double horizontal = Math.hypot(velocity.getX(), velocity.getZ());
+        return horizontal <= maxHorizontalSpeed;
     }
 
     private static double surfaceYBelow(World world, Location feet, double entityHeight) {

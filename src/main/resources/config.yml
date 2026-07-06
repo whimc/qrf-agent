@@ -64,8 +64,12 @@ agent-player-nav-stationary-ticks: 1200
 agent-follow-catch-up-distance: 16.0
 # Blocks to the side of the player when catch-up teleporting.
 agent-follow-catch-up-offset: 1.5
-# Mob agents (hovering): preferred horizontal distance behind the player while floating.
+# Mob agents (hovering): preferred horizontal distance behind the player while moving.
 agent-mob-follow-distance: 3.5
+# When the owner is stopped, mob agents settle this far in front of their view (plus side offset).
+agent-mob-idle-side-offset: 1.5
+# Max horizontal velocity (blocks/tick) to treat the owner as idle for mob settle positioning.
+agent-mob-idle-settle-speed: 0.08
 # Blocks per tick for mob glide speed (Paper velocity cap applies).
 agent-mob-follow-speed: 0.32
 # Stop gliding when within this distance of the follow target.
