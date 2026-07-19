@@ -5,6 +5,7 @@ import org.apache.poi.hwpf.extractor.WordExtractor;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -13,7 +14,9 @@ import java.nio.file.Path;
 import java.util.Locale;
 
 /**
- * Extracts plain text from RAG source files ({@code .txt}, {@code .md}, {@code .doc}, {@code .docx}).
+ * Extracts plain text from RAG source files
+ * ({@code .txt}, {@code .md}, {@code .doc}, {@code .docx}, {@code .yml}, {@code .yaml}).
+ * Citizens NPC storage YAML is summarized to names, dialogue, labels, and locations.
  */
 public final class RagDocumentReader {
 
@@ -30,8 +33,18 @@ public final class RagDocumentReader {
             case "txt", "md" -> Files.readString(file, StandardCharsets.UTF_8);
             case "docx" -> readDocx(file);
             case "doc" -> readDoc(file);
+            case "yml", "yaml" -> readYaml(file);
             default -> throw new IOException("Unsupported extension: " + ext);
         };
+    }
+
+    private static String readYaml(Path file) throws IOException {
+        File yamlFile = file.toFile();
+        String citizens = CitizensNpcYamlSummarizer.summarize(yamlFile);
+        if (citizens != null) {
+            return citizens;
+        }
+        return GenericYamlTextConverter.convert(yamlFile);
     }
 
     private static String readDocx(Path file) throws IOException {

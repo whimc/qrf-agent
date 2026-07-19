@@ -67,10 +67,23 @@ llm:
       - md
       - doc
       - docx
+      - yml
+      - yaml
   npc-context:
     enabled: true
     radius: 25.0
     max-items: 3
+  # Live learner data from WHIMC MySQL (observations, science tools, positions, progress).
+  activity-context:
+    enabled: false
+    max-own-observations: 10
+    max-peer-observations: 10
+    nearby-observation-radius: 80
+    include-peer-observations: true
+    max-science-tools: 12
+    position-lookback-ms: 900000
+    position-row-limit: 200
+    include-progress: true
   journey-actions:
     enabled: true
     max-destinations: 60
@@ -204,7 +217,7 @@ template-gui:
     end-your-own-response-speech: "&f&nClick here to stop query"
     guidance-response: "&f&nCan you show me something cool?"
     show-response: "&f&nI want to show you/ask about something unique to this environment!"
-    score-response: "&f&nI want to see my scores"
+    score-response: "&f&nShow me my scientist scores!"
     build-response: "&f&nI want to build something!"
     agent-edit: "&f&nI want to edit my agent"
   filler-item: white_stained_glass_pane

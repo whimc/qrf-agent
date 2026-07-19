@@ -45,6 +45,10 @@ public final class LlmConfigAnnouncer {
         }
         log.info("[OverworldAgent][LLM] global RAG enabled=" + ragEnabled
                 + " context-directory=" + cfg.getString("llm.context-directory", "llm-context"));
+        log.info("[OverworldAgent][LLM] activity-context enabled="
+                + cfg.getBoolean("llm.activity-context.enabled", false)
+                + " peers=" + cfg.getBoolean("llm.activity-context.include-peer-observations", true)
+                + " progress=" + cfg.getBoolean("llm.activity-context.include-progress", true));
         if (ragEnabled) {
             announceRagDirectory(log, "global", LlmRagContextBuilder.resolveContextRoot(plugin), plugin);
         }

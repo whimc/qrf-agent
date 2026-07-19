@@ -9,6 +9,7 @@ import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import edu.whimc.overworld_agent.dialoguetemplate.models.Chatbot;
 import edu.whimc.overworld_agent.dialoguetemplate.models.DialoguePrompt;
 import edu.whimc.overworld_agent.llm.context.AgentChatEvent;
+import edu.whimc.overworld_agent.llm.context.LearnerActivityContextProvider;
 import edu.whimc.overworld_agent.llm.research.AgentChatResearchLogger;
 import edu.whimc.overworld_agent.llm.research.AgentChatResearchTurn;
 
@@ -74,6 +75,8 @@ public class Dialogue implements Listener {
     private String discussionSessionId;
     private int discussionTurnIndex;
     private DialoguePrompt builtInUnknownPrompt;
+    /** Prevents overlapping free-discussion turns while activity + LLM are in flight. */
+    private boolean discussionBusy;
 
     public Dialogue(OverworldAgent plugin, Player player, boolean text, boolean embodied) {
         this.spigotCallback = plugin.getSpigotCallback();
@@ -828,6 +831,10 @@ public class Dialogue implements Listener {
                 Utils.msgNoPrefix(player, ChatColor.RED + "Enter a message in chat, or type stop to end the chat.");
                 return;
             }
+            if (discussionBusy) {
+                Utils.msgNoPrefix(player, ChatColor.GRAY + "Please wait for the previous reply before sending another message.");
+                return;
+            }
             response = StringUtils.trimToEmpty(text);
             // Echo privately because the public chat event is cancelled while in chat mode.
             Utils.msgNoPrefix(player, "&7You: &f" + response);
@@ -1058,7 +1065,7 @@ public class Dialogue implements Listener {
         String guidanceResponse = cfg.getString("template-gui.text.guidance-response",
                 "&f&nCan you show me something cool?");
         String scoreResponse = cfg.getString("template-gui.text.score-response",
-                "&f&nI want to see my scores");
+                "&f&nShow me my scientist scores!");
         String agentEdit = cfg.getString("template-gui.text.agent-edit",
                 "&f&nI want to edit my agent");
 
@@ -1108,7 +1115,7 @@ public class Dialogue implements Listener {
         sendComponent(
                 player,
                 "&8" + BULLET + scoreResponse,
-                "&aClick here to see your scores!",
+                "&aClick here to see your scientist scores!",
                 p -> {
 
                     this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Progress"), id -> {
@@ -1547,6 +1554,7 @@ public class Dialogue implements Listener {
         final boolean[] dialogueResearchLogged = {false};
 
         Runnable storeAndSend = () -> Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            discussionBusy = false;
             if (!dialogueResearchLogged[0]) {
                 logDialogueDiscussionPmmlTurn(
                         finalResponse,
@@ -1556,103 +1564,148 @@ public class Dialogue implements Listener {
                         finalCertainty
                 );
             }
-            this.plugin.getQueryer().storeNewScienceInquiry(player, finalResponse, feedbackOut[0], id -> {
-                this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Dialogue"), id2 -> {
-                    if (finalPrompt1 != null && !finalPrompt1.getPrompt().equalsIgnoreCase("science_tool")) {
-                        player.sendMessage(feedbackOut[0]);
+            // Always deliver the reply even if MySQL logging fails.
+            if (finalPrompt1 != null && !finalPrompt1.getPrompt().equalsIgnoreCase("science_tool")) {
+                if (player.isOnline()) {
+                    player.sendMessage(feedbackOut[0]);
+                }
+            }
+            if (plugin.getQueryer() == null) {
+                return;
+            }
+            try {
+                plugin.getQueryer().storeNewScienceInquiry(player, finalResponse, feedbackOut[0], id -> {
+                    if (plugin.getQueryer() != null) {
+                        plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Dialogue"), id2 -> {});
                     }
                 });
-            });
+            } catch (Exception ex) {
+                plugin.getLogger().warning("Failed to log dialogue turn: " + ex.getMessage());
+            }
         }, 20L);
 
         if (plugin.getConfig().getBoolean("llm.use-for-reply", false)
                 && plugin.getLlmProvider() != null
                 && plugin.getLlmProvider().isConfigured()) {
             plugin.getLogger().fine("[OverworldAgent][Journey] LLM path started");
+            discussionBusy = true;
+            Utils.msgNoPrefix(player, ChatColor.GRAY + "Thinking...");
             boolean journeyActions = plugin.getConfig().getBoolean("llm.journey-actions.enabled", true)
                     && Bukkit.getPluginManager().getPlugin("Journey") != null;
 
             java.util.function.Consumer<List<JourneyWaypointChoice>> startLlm = guidanceChoices -> {
                 List<JourneyGuidanceCatalog.Destination> destinations =
                         JourneyLlmBridge.fromWaypointChoices(guidanceChoices);
-                String systemPrompt = plugin.buildLlmSystemPrompt(player);
-                if (journeyActions && !destinations.isEmpty()) {
-                    int max = plugin.getConfig().getInt("llm.journey-actions.max-destinations", 60);
-                    systemPrompt = JourneyLlmBridge.appendDestinationContext(systemPrompt, destinations, max);
-                }
-                final String llmSystemPrompt = systemPrompt;
-                final String llmUserMessage = buildLlmMessageWithHistory(finalResponse);
-                final long requestStartedAt = System.currentTimeMillis();
-                final String turnId = newDiscussionTurnId();
-                final int turnIndex = nextDiscussionTurnIndex();
-                final String traceId = UUID.randomUUID().toString().substring(0, 8);
-                final String providerName = plugin.getConfig().getString("llm.provider", "unknown");
-                final String modelName = plugin.getConfig().getString("llm.model", "unknown");
-                final boolean ragEnabled = plugin.getConfig().getBoolean("llm.rag.enabled", false);
-                final String systemPromptHash = AgentChatResearchLogger.sha256OrNull(llmSystemPrompt);
 
-                Chatbot llmChatbot = new Chatbot(llmUserMessage);
-                CompletableFuture.supplyAsync(() -> {
+                LearnerActivityContextProvider.load(plugin, player, snapshot -> {
                     try {
-                        return llmChatbot.generateLlmReply(plugin.getLlmProvider(), llmSystemPrompt);
-                    } catch (Exception ex) {
-                        plugin.getLogger().warning("LLM reply failed: " + ex.getMessage());
-                        return null;
-                    }
-                }).thenAccept(llmText -> Bukkit.getScheduler().runTask(plugin, () -> {
-                    long responseReceivedAt = System.currentTimeMillis();
-                    int latencyMs = (int) (responseReceivedAt - requestStartedAt);
-                    String status;
-                    String errorMessage = null;
-                    String assistantForLog = feedbackOut[0];
-
-                    if (llmText != null && !llmText.isBlank()) {
-                        JourneyLlmBridge.ParsedReply parsed = JourneyLlmBridge.parseLlmReply(llmText);
-                        feedbackOut[0] = parsed.displayText().isBlank() ? llmText : parsed.displayText();
-                        assistantForLog = feedbackOut[0];
-                        String journeyTarget = parsed.journeyNameId();
-                        if (journeyTarget == null && journeyActions) {
-                            journeyTarget = JourneyLlmBridge.matchDestination(finalResponse, destinations).orElse(null);
+                        String systemPrompt = plugin.buildLlmSystemPrompt(player);
+                        if (journeyActions && !destinations.isEmpty()) {
+                            int max = plugin.getConfig().getInt("llm.journey-actions.max-destinations", 60);
+                            systemPrompt = JourneyLlmBridge.appendDestinationContext(systemPrompt, destinations, max);
                         }
-                        if (journeyTarget != null && journeyActions) {
-                            plugin.getLogger().info(
-                                    "[OverworldAgent][Journey] LLM-triggered navigation for "
-                                            + player.getName()
-                                            + ": "
-                                            + journeyTarget);
-                            dispatchJourneyCommand(player, journeyTarget);
+                        String activityPrompt = LearnerActivityContextProvider.isEnabled(plugin)
+                                ? LearnerActivityContextProvider.formatForPrompt(snapshot, player)
+                                : "";
+                        if (!activityPrompt.isBlank()) {
+                            systemPrompt = systemPrompt + activityPrompt;
+                            if (plugin.getConfig().getBoolean("llm.debug-log", false)) {
+                                plugin.getLogger().info(
+                                        "[OverworldAgent][LLM] activity-context chars=" + activityPrompt.length()
+                                                + " for " + player.getName());
+                            }
                         }
-                        status = "SUCCESS";
-                    } else {
-                        status = "FALLBACK_PMML";
-                        errorMessage = "LLM returned no response; PMML/template reply shown.";
-                    }
+                        final String llmSystemPrompt = systemPrompt;
+                        final String llmUserMessage = buildLlmMessageWithHistory(finalResponse);
+                        final long requestStartedAt = System.currentTimeMillis();
+                        final String turnId = newDiscussionTurnId();
+                        final int turnIndex = nextDiscussionTurnIndex();
+                        final String traceId = UUID.randomUUID().toString().substring(0, 8);
+                        final String providerName = plugin.getConfig().getString("llm.provider", "unknown");
+                        final String modelName = plugin.getConfig().getString("llm.model", "unknown");
+                        final boolean ragEnabled = plugin.getConfig().getBoolean("llm.rag.enabled", false);
+                        final String systemPromptHash = AgentChatResearchLogger.sha256OrNull(llmSystemPrompt);
 
-                    dialogueResearchLogged[0] = true;
-                    logDialogueDiscussionLlmTurn(
-                            turnId,
-                            turnIndex,
-                            requestStartedAt,
-                            responseReceivedAt,
-                            latencyMs,
-                            finalResponse,
-                            assistantForLog,
-                            providerName,
-                            modelName,
-                            llmSystemPrompt,
-                            llmUserMessage,
-                            systemPromptHash,
-                            ragEnabled,
-                            status,
-                            errorMessage,
-                            traceId,
-                            finalPrompt1,
-                            finalPredictedClass,
-                            finalCertainty
-                    );
-                    recordDiscussionTurn(finalResponse, feedbackOut[0]);
-                    storeAndSend.run();
-                }));
+                        Chatbot llmChatbot = new Chatbot(llmUserMessage);
+                        CompletableFuture.supplyAsync(() -> {
+                            try {
+                                return llmChatbot.generateLlmReply(plugin.getLlmProvider(), llmSystemPrompt);
+                            } catch (Exception ex) {
+                                plugin.getLogger().warning("LLM reply failed: " + ex.getMessage());
+                                return null;
+                            }
+                        }).whenComplete((llmText, error) -> Bukkit.getScheduler().runTask(plugin, () -> {
+                            long responseReceivedAt = System.currentTimeMillis();
+                            int latencyMs = (int) (responseReceivedAt - requestStartedAt);
+                            String status;
+                            String errorMessage = null;
+                            String assistantForLog = feedbackOut[0];
+
+                            if (error != null) {
+                                status = "FALLBACK_PMML";
+                                errorMessage = error.getMessage();
+                                plugin.getLogger().warning("LLM reply failed: " + errorMessage);
+                            } else if (llmText != null && !llmText.isBlank()) {
+                                try {
+                                    JourneyLlmBridge.ParsedReply parsed = JourneyLlmBridge.parseLlmReply(llmText);
+                                    feedbackOut[0] = parsed.displayText().isBlank() ? llmText : parsed.displayText();
+                                    assistantForLog = feedbackOut[0];
+                                    String journeyTarget = parsed.journeyNameId();
+                                    if (journeyTarget == null && journeyActions) {
+                                        journeyTarget = JourneyLlmBridge.matchDestination(finalResponse, destinations).orElse(null);
+                                    }
+                                    if (journeyTarget != null && journeyActions) {
+                                        plugin.getLogger().info(
+                                                "[OverworldAgent][Journey] LLM-triggered navigation for "
+                                                        + player.getName()
+                                                        + ": "
+                                                        + journeyTarget);
+                                        dispatchJourneyCommand(player, journeyTarget);
+                                    }
+                                    status = "SUCCESS";
+                                } catch (Exception parseEx) {
+                                    feedbackOut[0] = llmText;
+                                    assistantForLog = llmText;
+                                    status = "SUCCESS";
+                                    plugin.getLogger().warning("LLM journey parse failed: " + parseEx.getMessage());
+                                }
+                            } else {
+                                status = "FALLBACK_PMML";
+                                errorMessage = "LLM returned no response; PMML/template reply shown.";
+                            }
+
+                            dialogueResearchLogged[0] = true;
+                            logDialogueDiscussionLlmTurn(
+                                    turnId,
+                                    turnIndex,
+                                    requestStartedAt,
+                                    responseReceivedAt,
+                                    latencyMs,
+                                    finalResponse,
+                                    assistantForLog,
+                                    providerName,
+                                    modelName,
+                                    llmSystemPrompt,
+                                    llmUserMessage,
+                                    systemPromptHash,
+                                    ragEnabled,
+                                    status,
+                                    errorMessage,
+                                    traceId,
+                                    finalPrompt1,
+                                    finalPredictedClass,
+                                    finalCertainty
+                            );
+                            recordDiscussionTurn(finalResponse, feedbackOut[0]);
+                            storeAndSend.run();
+                        }));
+                    } catch (Exception prepEx) {
+                        plugin.getLogger().warning(
+                                "LLM prompt preparation failed; using PMML reply: " + prepEx.getMessage());
+                        recordDiscussionTurn(finalResponse, feedbackOut[0]);
+                        storeAndSend.run();
+                    }
+                });
             };
 
             if (journeyActions) {

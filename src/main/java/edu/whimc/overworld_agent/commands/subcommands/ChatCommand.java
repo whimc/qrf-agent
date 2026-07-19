@@ -7,6 +7,7 @@ import edu.whimc.overworld_agent.dialoguetemplate.models.Chatbot;
 import edu.whimc.overworld_agent.dialoguetemplate.models.LlmProvider;
 import edu.whimc.overworld_agent.llm.context.AgentChatContextItem;
 import edu.whimc.overworld_agent.llm.context.AgentChatEvent;
+import edu.whimc.overworld_agent.llm.context.LearnerActivityContextProvider;
 import edu.whimc.overworld_agent.llm.context.NpcContextProvider;
 import edu.whimc.overworld_agent.llm.research.AgentChatResearchLogger;
 import edu.whimc.overworld_agent.llm.research.AgentChatResearchTurn;
@@ -17,6 +18,8 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -152,6 +155,14 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
         String message = event.getMessage();
 
         Bukkit.getScheduler().runTask(plugin, () -> handleInteractiveChatMessage(player, session, message));
+    }
+
+    @EventHandler
+    public void onQuit(PlayerQuitEvent event) {
+        ActiveChatSession removed = activeSessions.remove(event.getPlayer().getUniqueId());
+        if (removed != null) {
+            removed.setWaitingForResponse(false);
+        }
     }
 
     private void handleInteractiveChatMessage(Player player, ActiveChatSession session, String userMessage) {
@@ -291,7 +302,7 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
             return;
         }
 
-        List<AgentChatContextItem> contextItems = List.of();
+        List<AgentChatContextItem> contextItems = new ArrayList<>();
         String npcPromptContext = "";
 
         boolean npcContextEnabled = plugin.getConfig().getBoolean("llm.npc-context.enabled", true);
@@ -303,17 +314,18 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
 
                 NpcContextProvider npcContextProvider = new NpcContextProvider(plugin);
 
-                contextItems = npcContextProvider.getNearbyNpcContext(
+                List<AgentChatContextItem> npcItems = npcContextProvider.getNearbyNpcContext(
                         player,
                         turnId,
                         npcContextMaxItems,
                         npcContextRadius
                 );
+                contextItems.addAll(npcItems);
 
-                npcPromptContext = npcContextProvider.formatForPrompt(contextItems);
+                npcPromptContext = npcContextProvider.formatForPrompt(npcItems);
 
                 logStage(traceId, "NPC_CONTEXT",
-                        "Collected " + contextItems.size() +
+                        "Collected " + npcItems.size() +
                                 " nearby NPC context items. Prompt context length=" +
                                 npcPromptContext.length());
 
@@ -322,13 +334,84 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
                         "Failed to collect NPC context. Continuing without NPC context. " +
                                 e.getClass().getSimpleName() + ": " + e.getMessage());
 
-                contextItems = List.of();
                 npcPromptContext = "";
             }
         } else {
             logStage(traceId, "NPC_CONTEXT", "NPC context is disabled.");
         }
 
+        final String finalNpcPromptContext = npcPromptContext;
+        LearnerActivityContextProvider.load(plugin, player, snapshot -> {
+            String activityPrompt = LearnerActivityContextProvider.isEnabled(plugin)
+                    ? LearnerActivityContextProvider.formatForPrompt(snapshot, player)
+                    : "";
+            List<AgentChatContextItem> mergedContext = new ArrayList<>(contextItems);
+            if (LearnerActivityContextProvider.isEnabled(plugin)) {
+                mergedContext.addAll(LearnerActivityContextProvider.toContextItems(turnId, snapshot));
+            }
+
+            if (!activityPrompt.isBlank()) {
+                logStage(traceId, "ACTIVITY_CONTEXT",
+                        "Loaded learner activity context. Prompt context length=" + activityPrompt.length());
+            } else {
+                logStage(traceId, "ACTIVITY_CONTEXT",
+                        LearnerActivityContextProvider.isEnabled(plugin)
+                                ? "No learner activity rows for this turn."
+                                : "Learner activity context is disabled.");
+            }
+
+            continueLlmChatTurn(
+                    player,
+                    session,
+                    userMessage,
+                    traceId,
+                    conversationId,
+                    turnId,
+                    turnIndex,
+                    requestStartedAt,
+                    startedAtNanos,
+                    playerUuid,
+                    username,
+                    playerResearchId,
+                    sessionId,
+                    worldName,
+                    agentType,
+                    agentName,
+                    providerName,
+                    modelName,
+                    ragEnabled,
+                    provider,
+                    mergedContext,
+                    finalNpcPromptContext,
+                    activityPrompt);
+        });
+    }
+
+    private void continueLlmChatTurn(
+            Player player,
+            ActiveChatSession session,
+            String userMessage,
+            String traceId,
+            String conversationId,
+            String turnId,
+            int turnIndex,
+            long requestStartedAt,
+            long startedAtNanos,
+            String playerUuid,
+            String username,
+            String playerResearchId,
+            String sessionId,
+            String worldName,
+            String agentType,
+            String agentName,
+            String providerName,
+            String modelName,
+            boolean ragEnabled,
+            LlmProvider provider,
+            List<AgentChatContextItem> contextItems,
+            String npcPromptContext,
+            String activityPrompt
+    ) {
         String systemPrompt;
 
         try {
@@ -340,6 +423,9 @@ public class ChatCommand extends AbstractSubCommand implements Listener {
 
             if (!npcPromptContext.isBlank()) {
                 systemPrompt = systemPrompt + npcPromptContext;
+            }
+            if (activityPrompt != null && !activityPrompt.isBlank()) {
+                systemPrompt = systemPrompt + activityPrompt;
             }
 
             logStage(traceId, "RAG_CONTEXT",

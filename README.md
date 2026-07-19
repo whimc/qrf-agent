@@ -104,9 +104,9 @@ RAG (retrieval-augmented generation) here means: **optional** inclusion of plain
 | `llm.rag.enabled` | When `true`, scans that directory and appends bounded excerpts to the system prompt before each completion. |
 | `llm.rag.max-total-chars` / `max-file-chars` | Cap total and per-file bytes so prompts stay reasonable. |
 | `llm.rag.max-directory-depth` | How deep to walk subfolders. |
-| `llm.rag.include-extensions` | File extensions to read (default `txt`, `md`, `doc`, `docx`). Word files are converted to plain text via Apache POI. |
+| `llm.rag.include-extensions` | File extensions to read (default `txt`, `md`, `doc`, `docx`, `yml`, `yaml`). Word files use Apache POI; Citizens NPC YAML is summarized to dialogue/labels/locations. |
 
-Put glossaries, world lore, or lesson snippets as `.md`, `.txt`, `.doc`, or `.docx` files there. See [docs/llm-rag.md](docs/llm-rag.md) for behavior details.
+Put glossaries, world lore, or lesson snippets as `.md`, `.txt`, `.doc`, `.docx`, or `.yml`/`.yaml` files there. See [docs/llm-rag.md](docs/llm-rag.md) for behavior details.
 
 #### Per-world prompts (`world-prompts/`)
 
@@ -171,6 +171,41 @@ llm:
     radius: 25.0
     max-items: 3
 ```
+
+#### Learner activity context (`llm.activity-context`)
+
+When enabled, each LLM turn (dialogue **Discuss something** with `llm.use-for-reply`, and `/agent chat test`) queries the same MySQL DB as `mysql:` and appends a short snapshot for grounding directions. Live player location is included; position history is **summarized** (not every 2-second sample).
+
+| Table | What is injected |
+|-------|------------------|
+| `whimc_progress` | Latest component scores (observation, tools, exploration, quest, POI, overall) |
+| `whimc_player_positions` | Recent path summarized to biomes / hotspots |
+| `whimc_sciencetools` | Recent measurements for this player |
+| `whimc_observations` | This player's recent active observations + nearby peers' public ones |
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `llm.activity-context.enabled` | `false` | Turn on live activity injection |
+| `llm.activity-context.max-own-observations` | `10` | Cap for this player's recent observations |
+| `llm.activity-context.max-peer-observations` | `10` | Cap for nearby peer observations |
+| `llm.activity-context.nearby-observation-radius` | `80` | Peer observation search radius (blocks) |
+| `llm.activity-context.include-peer-observations` | `true` | Include other students' nearby observations |
+| `llm.activity-context.max-science-tools` | `12` | Cap for recent science-tool readings |
+| `llm.activity-context.position-lookback-ms` | `900000` | How far back to read positions (15 min) |
+| `llm.activity-context.position-row-limit` | `200` | Max position rows fetched before summarizing |
+| `llm.activity-context.include-progress` | `true` | Include latest `whimc_progress` scores |
+
+Example:
+
+```yaml
+llm:
+  activity-context:
+    enabled: true
+    include-peer-observations: true
+    nearby-observation-radius: 80
+```
+
+See also [docs/llm-rag.md](docs/llm-rag.md#learner-activity-context) (related live context, not file RAG).
 
 #### Example configs
 
@@ -245,11 +280,11 @@ Separate from embodied right-click dialogue and from `llm.use-for-reply` on the 
 **In-session behavior**
 
 1. Player runs `/agent chat test`.
-2. Each chat line is intercepted (public chat is cancelled; the player sees a private `You: â€¦` echo).
-3. The plugin builds a system prompt from `llm.system-prompt`, optional **RAG** (`llm.rag`), and optional **nearby NPC context** (`llm.npc-context`).
+2. Each chat line is intercepted (public chat is cancelled; the player sees a private `You: …` echo).
+3. The plugin builds a system prompt from world/`llm.system-prompt`, optional **RAG** (`llm.rag`), optional **nearby NPC context** (`llm.npc-context`), and optional **learner activity** (`llm.activity-context`).
 4. Up to **10** prior user/assistant lines in the session are prepended to the user message for short-term memory.
-5. The LLM runs **async**; the player sees `Thinkingâ€¦` then the assistant reply.
-6. Type **`exit`**, **`quit`**, **`stop`**, or run `/agent chat end` to leave the mode.
+5. The LLM runs **async**; the player sees `Thinking…` then the assistant reply.
+6. Type **`exit`**, **`quit`**, **`stop`**, or run `/agent chat end` to leave the mode. Quitting the server also ends the session.
 
 **Requirements:** MySQL configured and reachable (schema migration **8** creates chat research tables). Provider must be configured (`llm.provider` + key/model or `base-url` for local).
 
@@ -261,7 +296,7 @@ Each turn from **`/agent chat test`** and from **dialogue free discussion** (Dis
 |-------|---------|
 | `whimc_agent_chat_conversations` | One row per interactive session. |
 | `whimc_agent_chat_turns` | User message, assistant response, provider metadata, timing. |
-| `whimc_agent_chat_context_items` | Nearby NPC context rows attached to a turn. |
+| `whimc_agent_chat_context_items` | Nearby NPC / learner-activity context rows attached to a turn (interactive chat). |
 | `whimc_agent_chat_events` | Stage/trace events (LLM call, RAG, failures). |
 | `whimc_agent_chat_retrieved_chunks` | Reserved for RAG chunk metadata when populated. |
 
@@ -281,6 +316,8 @@ llm:
     enabled: true
     radius: 25.0
     max-items: 3
+  activity-context:
+    enabled: true
 ```
 
 Then in-game: `/agent chat test` â†’ type messages in chat â†’ `/agent chat end` when finished.
