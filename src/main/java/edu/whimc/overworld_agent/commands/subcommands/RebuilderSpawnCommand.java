@@ -2,6 +2,7 @@ package edu.whimc.overworld_agent.commands.subcommands;
 
 import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.commands.AbstractSubCommand;
+import edu.whimc.overworld_agent.traits.AgentFollowCatchUp;
 import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import edu.whimc.overworld_agent.traits.RebuilderTrait;
 import edu.whimc.overworld_agent.traits.SpawnExpertTrait;
@@ -79,8 +80,12 @@ public class RebuilderSpawnCommand extends AbstractSubCommand {
                 AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
                 plugin.getAgents().put(player.getName(), npc);
             });
+        } else if (AgentFollowCatchUp.respawnOwnedIfDespawned(plugin, player)) {
+            player.sendMessage("Your AI friend is back beside you.");
         } else {
-            player.sendMessage("You already have an AI friend. You can change their name or skin by right clicking on them.");
+            player.sendMessage("You already have an AI friend at "
+                    + AgentFollowCatchUp.describeAgentLocation(plugin.getAgents().get(player.getName()))
+                    + ". You can change their name or skin by right clicking on them.");
         }
         return true;
     }

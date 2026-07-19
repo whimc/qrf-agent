@@ -2,6 +2,7 @@ package edu.whimc.overworld_agent.commands.subcommands;
 
 import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.commands.AbstractSubCommand;
+import edu.whimc.overworld_agent.traits.AgentFollowCatchUp;
 import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import edu.whimc.overworld_agent.traits.SpawnExpertTrait;
@@ -98,7 +99,13 @@ public class SpeechSpawnCommand extends AbstractSubCommand {
             });
             return true;
         }
-        player.sendMessage("You already have an AI friend. You can change their name with /agent name and skin with /agent skin.");
+        if (AgentFollowCatchUp.respawnOwnedIfDespawned(plugin, player)) {
+            player.sendMessage("Your AI friend is back beside you.");
+            return true;
+        }
+        player.sendMessage("You already have an AI friend at "
+                + AgentFollowCatchUp.describeAgentLocation(plugin.getAgents().get(player.getName()))
+                + ". You can change their name with /agent name and skin with /agent skin.");
         return true;
     }
 

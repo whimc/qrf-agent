@@ -89,16 +89,20 @@ public class AgentPermanentFlyingTrait extends Trait {
             return;
         }
         Entity entity = npc.getEntity();
-        if (entity.getType() == EntityType.PLAYER) {
-            return;
-        }
-
         Player owner = AgentFollowCatchUp.followedPlayer(npc);
         if (owner == null || !owner.isOnline()) {
-            entity.setVelocity(new Vector(0, 0, 0));
+            if (entity.getType() != EntityType.PLAYER) {
+                entity.setVelocity(new Vector(0, 0, 0));
+            }
             return;
         }
         if (!owner.getWorld().equals(entity.getWorld())) {
+            return;
+        }
+
+        // Player agents: swim-follow at the owner's depth (pathfinding sinks them to the seabed).
+        if (entity.getType() == EntityType.PLAYER) {
+            AgentFollowCatchUp.tickPlayerAquaticSwim(plugin, npc, entity, owner);
             return;
         }
 

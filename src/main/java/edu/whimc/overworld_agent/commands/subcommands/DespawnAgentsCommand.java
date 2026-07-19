@@ -71,7 +71,7 @@ public class DespawnAgentsCommand extends AbstractSubCommand {
                     count++;
                 }
             }
-            sender.sendMessage("Despawned " + count + " agent(s).");
+            sender.sendMessage("Despawned " + count + " agent(s). Run /agent spawn to bring them back.");
             return true;
         }
 
@@ -98,7 +98,7 @@ public class DespawnAgentsCommand extends AbstractSubCommand {
         }
 
         npc.despawn();
-        sender.sendMessage(npc.getName() + " was despawned.");
+        sender.sendMessage(npc.getName() + " was despawned. Run /agent spawn to bring them back (not /agent destroy).");
         return true;
     }
 
