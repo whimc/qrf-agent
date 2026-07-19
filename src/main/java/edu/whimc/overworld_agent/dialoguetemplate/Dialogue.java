@@ -3,6 +3,11 @@ package edu.whimc.overworld_agent.dialoguetemplate;
 
 
 
+import com.sk89q.worldedit.bukkit.BukkitAdapter;
+import com.sk89q.worldguard.WorldGuard;
+import com.sk89q.worldguard.protection.managers.RegionManager;
+import com.sk89q.worldguard.protection.regions.ProtectedRegion;
+import com.sk89q.worldguard.protection.regions.RegionContainer;
 import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
@@ -47,7 +52,6 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 
@@ -55,6 +59,7 @@ import java.util.logging.Level;
 public class Dialogue implements Listener {
     private SpigotCallback spigotCallback;
     /* Unicode for bullet character */
+    private static final int GUIDANCE_NEAREST_LIMIT = 3;
     private static final String BULLET = "\u2022";
     private OverworldAgent plugin;
     private Player player;
@@ -287,10 +292,17 @@ public class Dialogue implements Listener {
     private static final class JourneyWaypointChoice implements JourneyLlmBridge.JourneyWaypointChoiceView {
         final String jtKey;
         final String label;
+        /** World position when known (for nearest-destination ranking). */
+        final Location location;
 
         JourneyWaypointChoice(String jtKey, String label) {
+            this(jtKey, label, null);
+        }
+
+        JourneyWaypointChoice(String jtKey, String label, Location location) {
             this.jtKey = jtKey;
             this.label = (label != null && !label.isBlank()) ? label : jtKey;
+            this.location = location;
         }
 
         @Override
@@ -308,7 +320,12 @@ public class Dialogue implements Listener {
         Map<String, JourneyWaypointChoice> byKey = new LinkedHashMap<>();
         for (JourneyWaypointChoice c : choices) {
             if (c != null && c.jtKey != null && !c.jtKey.isBlank()) {
-                byKey.putIfAbsent(c.jtKey.toLowerCase(Locale.ROOT), c);
+                String key = c.jtKey.toLowerCase(Locale.ROOT);
+                JourneyWaypointChoice existing = byKey.get(key);
+                // Prefer the entry that has a location when merging duplicates.
+                if (existing == null || (existing.location == null && c.location != null)) {
+                    byKey.put(key, c);
+                }
             }
         }
         List<JourneyWaypointChoice> out = new ArrayList<>(byKey.values());
@@ -316,22 +333,40 @@ public class Dialogue implements Listener {
         return out;
     }
 
+    private static boolean isPoiOrNpcKey(String jtKey) {
+        if (jtKey == null) {
+            return false;
+        }
+        String key = jtKey.toLowerCase(Locale.ROOT);
+        return key.startsWith("poi-") || key.startsWith("npc-");
+    }
+
     /**
-     * Picks a random subset of server (public) waypoints for the guidance menu: 3–5 when enough exist,
-     * otherwise all available (1–2).
+     * Picks up to {@code limit} nearest POI/NPC destinations on the player's current world.
      */
-    private static List<JourneyWaypointChoice> randomGuidanceWaypointSample(List<JourneyWaypointChoice> source) {
-        if (source == null || source.isEmpty()) {
+    private static List<JourneyWaypointChoice> nearestGuidanceWaypointSample(
+            Player player, List<JourneyWaypointChoice> source, int limit) {
+        if (player == null || source == null || source.isEmpty() || limit <= 0) {
             return Collections.emptyList();
         }
-        List<JourneyWaypointChoice> copy = new ArrayList<>(source);
-        Collections.shuffle(copy, ThreadLocalRandom.current());
-        int maxTake = Math.min(5, copy.size());
-        int minTake = Math.min(3, copy.size());
-        int count = (minTake == maxTake)
-                ? minTake
-                : (minTake + ThreadLocalRandom.current().nextInt(maxTake - minTake + 1));
-        return new ArrayList<>(copy.subList(0, count));
+        Location origin = player.getLocation();
+        World world = origin.getWorld();
+        if (world == null) {
+            return Collections.emptyList();
+        }
+        List<JourneyWaypointChoice> ranked = new ArrayList<>();
+        for (JourneyWaypointChoice c : source) {
+            if (c == null || !isPoiOrNpcKey(c.jtKey)) {
+                continue;
+            }
+            if (c.location == null || c.location.getWorld() == null || !c.location.getWorld().equals(world)) {
+                continue;
+            }
+            ranked.add(c);
+        }
+        ranked.sort(Comparator.comparingDouble(c -> c.location.distanceSquared(origin)));
+        int take = Math.min(limit, ranked.size());
+        return new ArrayList<>(ranked.subList(0, take));
     }
 
     private static List<Object> flattenWaypointContainer(Object all) {
@@ -520,7 +555,35 @@ public class Dialogue implements Listener {
         if (label == null || label.isBlank()) {
             label = key;
         }
-        return new JourneyWaypointChoice(key, label);
+        Location location = locationFromWaypointCell(waypoint);
+        return new JourneyWaypointChoice(key, label, location);
+    }
+
+    private static Location locationFromWaypointCell(Object waypoint) {
+        Object cell = extractWaypointCell(waypoint);
+        Integer[] coords = cellCoords(cell);
+        if (coords == null) {
+            return null;
+        }
+        World world = null;
+        Integer domain = cellDomainIndex(cell);
+        if (domain != null) {
+            world = worldForJourneyDomain(domain);
+        }
+        if (world == null) {
+            return null;
+        }
+        return new Location(world, coords[0] + 0.5, coords[1], coords[2] + 0.5);
+    }
+
+    private static World worldForJourneyDomain(int domain) {
+        for (World world : Bukkit.getWorlds()) {
+            Integer id = journeyDomainForWorldSafe(world);
+            if (id != null && id == domain) {
+                return world;
+            }
+        }
+        return null;
     }
 
     /**
@@ -918,6 +981,139 @@ public class Dialogue implements Listener {
         }
     }
 
+    /**
+     * Destinations for the "something cool" menu: public Journey waypoints + POI regions on the
+     * player's <em>current</em> world only (locations attached when available).
+     */
+    private void loadSameWorldGuidanceDestinations(Player player, Consumer<List<JourneyWaypointChoice>> callback) {
+        if (callback == null || player == null) {
+            return;
+        }
+        FileConfiguration cfg = plugin.getConfig();
+        World world = player.getWorld();
+        Integer domain = journeyDomainForWorldSafe(world);
+        Set<Integer> domains = domain == null ? Set.of() : Set.of(domain);
+
+        List<JourneyWaypointChoice> choices = new ArrayList<>();
+        if (!domains.isEmpty()) {
+            choices.addAll(collectJourneyPublicWaypoints(domains));
+        }
+
+        String poiSource = cfg.getString("journey.poi-source", "both");
+        boolean useWorldGuard = "worldguard".equalsIgnoreCase(poiSource) || "both".equalsIgnoreCase(poiSource);
+        boolean useDatabase = "database".equalsIgnoreCase(poiSource) || "both".equalsIgnoreCase(poiSource);
+        int poiFromWorldGuard = 0;
+        if (cfg.getBoolean("journey.include-poi-regions", true) && useWorldGuard) {
+            for (JourneyWaypointChoice poi : poiChoicesFromWorldGuard(world, cfg)) {
+                choices.add(poi);
+                poiFromWorldGuard++;
+            }
+        }
+        List<JourneyWaypointChoice> mergedChoices = sortUniqueChoices(choices);
+        final int journeyCount = (int) mergedChoices.stream().filter(c -> isPoiOrNpcKey(c.jtKey)).count();
+        final int poiFromWorldGuardFinal = poiFromWorldGuard;
+
+        Runnable finish = () -> {
+            if (cfg.getBoolean("journey.debug-log", false)) {
+                plugin.getLogger().info(
+                        "[OverworldAgent][Journey] same-world guidance ("
+                                + player.getName()
+                                + " world="
+                                + world.getName()
+                                + " domain="
+                                + domain
+                                + " poiOrNpcChoices="
+                                + journeyCount
+                                + " poiFromWorldGuard="
+                                + poiFromWorldGuardFinal
+                                + " totalChoices="
+                                + mergedChoices.size()
+                                + ")");
+            }
+            callback.accept(mergedChoices);
+        };
+
+        if (cfg.getBoolean("journey.include-poi-regions", true) && useDatabase && plugin.getQueryer() != null) {
+            String tablePrefix = cfg.getString("journey.worldguard-table-prefix", "rg_");
+            String poiPrefix = cfg.getString("journey.poi-region-prefix", "poi-");
+            // DB listing is by world-name prefix; filter to this exact world afterward.
+            plugin.getQueryer().listPoiRegions(world.getName(), poiPrefix, tablePrefix, dbPoi -> {
+                List<JourneyWaypointChoice> withDb = new ArrayList<>(mergedChoices);
+                if (dbPoi != null) {
+                    for (JourneyGuidanceCatalog.Destination poi : dbPoi) {
+                        if (poi == null || poi.jtKey() == null) {
+                            continue;
+                        }
+                        withDb.add(new JourneyWaypointChoice(poi.jtKey(), poi.label(), null));
+                    }
+                }
+                List<JourneyWaypointChoice> finalChoices = sortUniqueChoices(withDb);
+                if (cfg.getBoolean("journey.debug-log", false)) {
+                    plugin.getLogger().info(
+                            "[OverworldAgent][Journey] same-world guidance+db ("
+                                    + player.getName()
+                                    + " world="
+                                    + world.getName()
+                                    + " finalChoiceCount="
+                                    + finalChoices.size()
+                                    + ")");
+                }
+                callback.accept(finalChoices);
+            });
+            return;
+        }
+        finish.run();
+    }
+
+    private static List<JourneyWaypointChoice> poiChoicesFromWorldGuard(World world, FileConfiguration cfg) {
+        if (world == null || Bukkit.getPluginManager().getPlugin("WorldGuard") == null) {
+            return List.of();
+        }
+        String poiPrefix = cfg.getString("journey.poi-region-prefix", "poi-");
+        if (poiPrefix == null) {
+            poiPrefix = "poi-";
+        }
+        String prefixLower = poiPrefix.toLowerCase(Locale.ROOT);
+        List<JourneyWaypointChoice> out = new ArrayList<>();
+        try {
+            RegionContainer container = WorldGuard.getInstance().getPlatform().getRegionContainer();
+            RegionManager manager = container.get(BukkitAdapter.adapt(world));
+            if (manager == null) {
+                return List.of();
+            }
+            for (Map.Entry<String, ProtectedRegion> entry : manager.getRegions().entrySet()) {
+                String regionId = entry.getKey();
+                if (regionId == null || !regionId.toLowerCase(Locale.ROOT).startsWith(prefixLower)) {
+                    continue;
+                }
+                ProtectedRegion region = entry.getValue();
+                Location center = regionCenter(world, region);
+                String key = regionId.toLowerCase(Locale.ROOT);
+                out.add(new JourneyWaypointChoice(
+                        key, JourneyGuidanceCatalog.formatPoiLabel(regionId, poiPrefix), center));
+            }
+        } catch (Throwable ignored) {
+            return List.of();
+        }
+        return out;
+    }
+
+    private static Location regionCenter(World world, ProtectedRegion region) {
+        if (world == null || region == null) {
+            return null;
+        }
+        try {
+            var min = region.getMinimumPoint();
+            var max = region.getMaximumPoint();
+            double x = (min.getX() + max.getX()) / 2.0;
+            double y = (min.getY() + max.getY()) / 2.0;
+            double z = (min.getZ() + max.getZ()) / 2.0;
+            return new Location(world, x, y, z);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     private void loadGuidanceDestinations(Player player, Consumer<List<JourneyWaypointChoice>> callback) {
         FileConfiguration cfg = plugin.getConfig();
         List<World> linkedWorlds = JourneyGuidanceCatalog.linkedWorlds(player.getWorld(), cfg);
@@ -1014,18 +1210,15 @@ public class Dialogue implements Listener {
     }
 
     private void showGuidanceDestinationMenu(Player player, String guidanceResponse, List<JourneyWaypointChoice> guidanceChoices) {
-        FileConfiguration cfg = plugin.getConfig();
-        List<World> linkedWorlds = JourneyGuidanceCatalog.linkedWorlds(player.getWorld(), cfg);
-        String linkedPrefix = JourneyGuidanceCatalog.linkedPrefixFor(player.getWorld(), cfg);
-        final boolean linkedCluster = linkedWorlds.size() > 1;
-        final List<JourneyWaypointChoice> guidanceDisplay = randomGuidanceWaypointSample(guidanceChoices);
-        String hoverPick = linkedCluster
-                ? "&aRandom places in linked worlds (" + linkedPrefix + "*) — click to journey"
-                : "&aA few random places in this world — click to journey";
+        final List<JourneyWaypointChoice> guidanceDisplay =
+                nearestGuidanceWaypointSample(player, guidanceChoices, GUIDANCE_NEAREST_LIMIT);
+        if (guidanceDisplay.isEmpty()) {
+            return;
+        }
         sendComponent(
                 player,
                 "&8" + BULLET + guidanceResponse,
-                hoverPick,
+                "&aNearest POIs/NPCs in this world — click to journey",
                 p -> {
                     this.spigotCallback.clearCallbacks(player);
                     Utils.msgNoPrefix(player, "&lPick a destination:", "");
@@ -1092,8 +1285,10 @@ public class Dialogue implements Listener {
         Runnable sendMenuTail = () -> sendDialogueMenuTail(cfg, scoreResponse, agentEdit);
 
         if (Bukkit.getPluginManager().getPlugin("Journey") != null) {
-            loadGuidanceDestinations(player, guidanceChoices -> {
-                if (!guidanceChoices.isEmpty()) {
+            loadSameWorldGuidanceDestinations(player, guidanceChoices -> {
+                List<JourneyWaypointChoice> nearest =
+                        nearestGuidanceWaypointSample(player, guidanceChoices, GUIDANCE_NEAREST_LIMIT);
+                if (!nearest.isEmpty()) {
                     showGuidanceDestinationMenu(player, guidanceResponse, guidanceChoices);
                 } else {
                     sendComponent(

@@ -137,12 +137,14 @@ public class Queryer {
     private static final String QUERY_OWN_OBSERVATIONS =
             "SELECT observation_color_stripped, observation, x, y, z, world, time, category, username "
                     + "FROM whimc_observations WHERE uuid = ? AND active = 1 "
-                    + "AND (expiration IS NULL OR expiration > ?) ORDER BY time DESC LIMIT ?";
+                    + "AND (expiration IS NULL OR expiration <= 0 OR expiration > ?) "
+                    + "ORDER BY time DESC LIMIT ?";
 
-    private static final String QUERY_PEER_OBSERVATIONS_NEARBY =
+    /** Any active floating observation near the player (own or peer). */
+    private static final String QUERY_NEARBY_OBSERVATIONS =
             "SELECT observation_color_stripped, observation, x, y, z, world, time, category, username, uuid "
-                    + "FROM whimc_observations WHERE world = ? AND uuid <> ? AND active = 1 "
-                    + "AND (expiration IS NULL OR expiration > ?) "
+                    + "FROM whimc_observations WHERE LOWER(world) = LOWER(?) AND active = 1 "
+                    + "AND (expiration IS NULL OR expiration <= 0 OR expiration > ?) "
                     + "AND x BETWEEN ? AND ? AND z BETWEEN ? AND ? "
                     + "ORDER BY time DESC LIMIT ?";
 
@@ -937,7 +939,7 @@ public class Queryer {
                     ownObservations = queryOwnObservations(connection, uuid, now, options.maxOwnObservations());
                 }
                 if (options.includePeerObservations() && options.maxPeerObservations() > 0 && !worldName.isBlank()) {
-                    peerObservations = queryPeerObservationsNearby(
+                    peerObservations = queryNearbyObservations(
                             connection,
                             uuid,
                             worldName,
@@ -959,6 +961,19 @@ public class Queryer {
                 positionSummary = LearnerActivityContextProvider.summarizePositions(samples, 5, 5);
             } catch (SQLException exc) {
                 plugin.getLogger().warning("Failed to load learner activity context: " + exc.getMessage());
+            }
+
+            if (plugin.getConfig().getBoolean("llm.debug-log", false)) {
+                plugin.getLogger().info(String.format(
+                        Locale.ROOT,
+                        "[OverworldAgent][LLM] activity-context load uuid=%s world=%s ownObs=%d nearbyObs=%d tools=%d positions=%s progress=%s",
+                        uuid,
+                        worldName,
+                        ownObservations.size(),
+                        peerObservations.size(),
+                        scienceTools.size(),
+                        positionSummary == null || positionSummary.isEmpty() ? "empty" : "ok",
+                        progress == null ? "none" : "ok"));
             }
 
             sync(callback, new LearnerActivitySnapshot(
@@ -1009,7 +1024,7 @@ public class Queryer {
         return out;
     }
 
-    private List<ObservationRow> queryPeerObservationsNearby(
+    private List<ObservationRow> queryNearbyObservations(
             Connection connection,
             String uuid,
             String worldName,
@@ -1021,16 +1036,16 @@ public class Queryer {
             int limit
     ) {
         List<ObservationRow> candidates = new ArrayList<>();
-        int fetchLimit = Math.max(limit * 3, limit);
-        try (PreparedStatement statement = connection.prepareStatement(QUERY_PEER_OBSERVATIONS_NEARBY)) {
+        // Wider recent fetch, then keep nearest (time-first SQL can miss a close older hologram).
+        int fetchLimit = Math.max(limit * 8, 80);
+        try (PreparedStatement statement = connection.prepareStatement(QUERY_NEARBY_OBSERVATIONS)) {
             statement.setString(1, worldName);
-            statement.setString(2, uuid);
-            statement.setLong(3, now);
-            statement.setDouble(4, px - radius);
-            statement.setDouble(5, px + radius);
-            statement.setDouble(6, pz - radius);
-            statement.setDouble(7, pz + radius);
-            statement.setInt(8, fetchLimit);
+            statement.setLong(2, now);
+            statement.setDouble(3, px - radius);
+            statement.setDouble(4, px + radius);
+            statement.setDouble(5, pz - radius);
+            statement.setDouble(6, pz + radius);
+            statement.setInt(7, fetchLimit);
             try (ResultSet results = statement.executeQuery()) {
                 while (results.next()) {
                     double x = results.getDouble("x");
@@ -1047,7 +1062,7 @@ public class Queryer {
                 }
             }
         } catch (SQLException exc) {
-            plugin.getLogger().warning("activity-context: whimc_observations (peers) query failed: " + exc.getMessage());
+            plugin.getLogger().warning("activity-context: whimc_observations (nearby) query failed: " + exc.getMessage());
             return List.of();
         }
         candidates.sort(Comparator.comparingDouble(o -> o.distance() == null ? Double.MAX_VALUE : o.distance()));

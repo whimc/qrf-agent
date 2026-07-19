@@ -172,8 +172,8 @@ public final class LearnerActivityContextProvider {
 
         List<ObservationRow> peers = snapshot.peerObservations();
         if (peers != null && !peers.isEmpty()) {
-            out.append("\n### Nearby public observations (peers)\n");
-            out.append("These are visible in-world; help the learner notice and compare when they are useful.\n");
+            out.append("\n### Nearby floating observations (in-world holograms)\n");
+            out.append("These are public /observe notes near the player — notice and compare when useful.\n");
             for (ObservationRow row : peers) {
                 appendObservationLine(out, row, true);
             }
