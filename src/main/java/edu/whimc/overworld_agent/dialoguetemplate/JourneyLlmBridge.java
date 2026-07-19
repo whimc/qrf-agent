@@ -11,13 +11,21 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Lets the optional LLM trigger Journey navigation via a structured {@code JOURNEY:name_id} line
- * and fuzzy matching against the same destination catalog used by the guidance menu.
+ * Lets the optional LLM trigger Journey navigation via a structured {@code JOURNEY:name_id}
+ * directive (own line or trailing) and fuzzy matching against the guidance catalog.
  */
 public final class JourneyLlmBridge {
 
-    private static final Pattern JOURNEY_DIRECTIVE = Pattern.compile(
+    /** Own line: {@code JOURNEY:poi-foo} */
+    private static final Pattern JOURNEY_LINE = Pattern.compile(
             "(?im)^\\s*JOURNEY\\s*:\\s*(\\S+)\\s*$");
+
+    /**
+     * Inline / trailing forms models often emit under short-reply constraints, e.g.
+     * {@code ... visit the museum. Journey:poi-museum_of_mynoa}
+     */
+    private static final Pattern JOURNEY_INLINE = Pattern.compile(
+            "(?i)(?:^|[\\s.!?])JOURNEY\\s*:\\s*([A-Za-z0-9_.:/-]+)\\s*$");
 
     public record ParsedReply(String displayText, String journeyNameId) {}
 
@@ -37,11 +45,12 @@ public final class JourneyLlmBridge {
 
         StringBuilder block = new StringBuilder();
         block.append("\n\n## Navigation (Journey plugin)\n");
-        block.append("When the player asks to go somewhere, visit a place, meet a character, or explore a region, ");
-        block.append("and you can identify a destination from the list below, end your reply with a line exactly:\n");
+        block.append("When you want the server to take the player somewhere from the list below, ");
+        block.append("end your reply with a FINAL line that contains ONLY this (no other words on that line):\n");
         block.append("JOURNEY:<name_id>\n");
-        block.append("Use the name_id from the list (not the display label). ");
-        block.append("The JOURNEY line is for the server only — do not explain it to the player.\n");
+        block.append("That line is stripped before the player sees your message — it does not count toward ");
+        block.append("your 2-sentence limit. Use the name_id from the list (not the display label). ");
+        block.append("Do not write Journey: inline inside a sentence.\n");
         block.append("Available destinations (name_id — label):\n");
         for (JourneyGuidanceCatalog.Destination d : sorted) {
             block.append("- ").append(d.jtKey()).append(" — ").append(d.label()).append('\n');
@@ -53,17 +62,30 @@ public final class JourneyLlmBridge {
         if (llmText == null || llmText.isBlank()) {
             return new ParsedReply("", null);
         }
-        Matcher matcher = JOURNEY_DIRECTIVE.matcher(llmText);
+
         String nameId = null;
-        String last = null;
-        while (matcher.find()) {
-            last = matcher.group(1).toLowerCase(Locale.ROOT);
+        Matcher lineMatcher = JOURNEY_LINE.matcher(llmText);
+        while (lineMatcher.find()) {
+            nameId = lineMatcher.group(1).toLowerCase(Locale.ROOT);
         }
-        if (last != null) {
-            nameId = last;
+
+        String withoutLines = JOURNEY_LINE.matcher(llmText).replaceAll("").trim();
+
+        if (nameId == null) {
+            Matcher inlineMatcher = JOURNEY_INLINE.matcher(withoutLines);
+            if (inlineMatcher.find()) {
+                nameId = inlineMatcher.group(1).toLowerCase(Locale.ROOT);
+                // Strip trailing "Journey:id" (and a preceding space/punct if present)
+                withoutLines = withoutLines.substring(0, inlineMatcher.start()).replaceAll("[\\s.!?]+$", "").trim();
+            }
         }
-        String display = JOURNEY_DIRECTIVE.matcher(llmText).replaceAll("").trim();
-        return new ParsedReply(display, nameId);
+
+        if (nameId != null) {
+            // Strip accidental wrapping punctuation models sometimes add
+            nameId = nameId.replaceAll("^[^a-z0-9]+|[^a-z0-9_.:/-]+$", "");
+        }
+
+        return new ParsedReply(withoutLines, StringUtils.isBlank(nameId) ? null : nameId);
     }
 
     /**
