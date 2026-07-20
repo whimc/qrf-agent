@@ -32,7 +32,8 @@ public final class AgentFollowCatchUp {
     }
 
     public static double besideOffset(OverworldAgent plugin) {
-        return plugin.getConfig().getDouble(CFG_CATCH_UP_OFFSET, 1.5);
+        // Default ~2 blocks so the owner can see the agent after catch-up / teleport.
+        return plugin.getConfig().getDouble(CFG_CATCH_UP_OFFSET, 2.0);
     }
 
     /**
@@ -89,7 +90,6 @@ public final class AgentFollowCatchUp {
     /**
      * Horizontal follow point for hovering mob agents. When the owner is idle, the mob settles in
      * front of their view (slightly to the side) so it stays clickable; while moving, it trails behind.
-     * In water, the target tracks the owner's Y (swim alongside) instead of the seabed.
      */
     public static Location mobFollowTarget(OverworldAgent plugin, Player player, double entityHeight) {
         if (player == null || !player.isOnline()) {
@@ -117,46 +117,10 @@ public final class AgentFollowCatchUp {
         } else {
             spot = base.clone().subtract(forward.multiply(followDistance));
         }
-        if (isAquatic(player)) {
-            spot.setY(base.getY());
-            return spot;
-        }
         if (hover <= 0) {
             return spot;
         }
         return withMobHoverHeight(plugin, spot, entityHeight);
-    }
-
-    /** True when the player is in/under water (or swimming). */
-    public static boolean isAquatic(Player player) {
-        if (player == null || !player.isOnline()) {
-            return false;
-        }
-        if (player.isInWater() || player.isSwimming()) {
-            return true;
-        }
-        try {
-            if (player.isUnderWater()) {
-                return true;
-            }
-        } catch (NoSuchMethodError ignored) {
-            // Older API
-        }
-        return isAquatic(player.getLocation()) || isAquatic(player.getEyeLocation());
-    }
-
-    public static boolean isAquatic(Location location) {
-        if (location == null || location.getWorld() == null) {
-            return false;
-        }
-        org.bukkit.block.Block block = location.getBlock();
-        if (block.isLiquid()) {
-            return true;
-        }
-        org.bukkit.Material type = block.getType();
-        return type == org.bukkit.Material.WATER
-                || type == org.bukkit.Material.BUBBLE_COLUMN
-                || type.name().endsWith("_WATER");
     }
 
     /**
@@ -236,12 +200,7 @@ public final class AgentFollowCatchUp {
         Location playerLoc = player.getLocation();
         if (!agentLoc.getWorld().equals(playerLoc.getWorld()) || isLostFromOwner(plugin, agentLoc, playerLoc)) {
             teleportBeside(plugin, npc, player);
-            boolean aquatic = isAquatic(player) || isAquatic(npc.getEntity().getLocation());
-            if (!aquatic) {
-                AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
-            } else if (npc.getNavigator().isNavigating()) {
-                npc.getNavigator().cancelNavigation();
-            }
+            AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
         }
     }
 
@@ -253,120 +212,8 @@ public final class AgentFollowCatchUp {
         if (Math.abs(agentLoc.getY() - playerLoc.getY()) > maxVertical) {
             return true;
         }
-        // Seabed / void: agent sank far below the owner (classic ocean hover bug).
-        if (playerLoc.getY() - agentLoc.getY() > 8.0) {
-            return true;
-        }
         World world = agentLoc.getWorld();
         return agentLoc.getY() < world.getMinHeight() + 4;
-    }
-
-    /**
-     * Keep agents with the owner in water. Player NPCs cannot pathfind-swim reliably — cancel
-     * navigation and match the owner's height every tick (via {@link AgentPermanentFlyingTrait}).
-     */
-    public static void syncAquaticIfNeeded(OverworldAgent plugin, NPC npc, Player player) {
-        if (plugin == null || npc == null || player == null || !player.isOnline()) {
-            return;
-        }
-        if (!npc.isSpawned() || npc.getEntity() == null) {
-            return;
-        }
-        Location agentLoc = npc.getEntity().getLocation();
-        Location playerLoc = player.getLocation();
-        if (!agentLoc.getWorld().equals(playerLoc.getWorld())) {
-            return;
-        }
-        boolean aquatic = isAquatic(player) || isAquatic(agentLoc);
-        if (!aquatic) {
-            return;
-        }
-        // Stop Citizens ground pathfinding — it walks/sinks player agents to the seabed.
-        if (npc.getNavigator().isNavigating()) {
-            npc.getNavigator().cancelNavigation();
-        }
-        double horizontal = horizontalDistance(agentLoc, playerLoc);
-        double vertical = Math.abs(agentLoc.getY() - playerLoc.getY());
-        // Snap when clearly below/away; fine motion is handled every tick for player agents.
-        if (horizontal > 4.0 || vertical > 1.5 || playerLoc.getY() - agentLoc.getY() > 1.0) {
-            Location dest = swimBesidePlayer(player, besideOffset(plugin));
-            if (dest == null) {
-                return;
-            }
-            npc.teleport(dest, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
-            // Do not re-enable FollowTrait pathfinding here — it undoes the snap.
-        }
-    }
-
-    /**
-     * Swim/follow target beside the owner at the owner's Y (never seabed / highest-block).
-     */
-    public static Location swimBesidePlayer(Player player, double offset) {
-        if (player == null || !player.isOnline()) {
-            return null;
-        }
-        Location base = player.getLocation();
-        Vector forward = base.getDirection();
-        forward.setY(0);
-        if (forward.lengthSquared() < 1.0E-4) {
-            forward = new Vector(0, 0, 1);
-        }
-        forward.normalize();
-        Vector right = new Vector(-forward.getZ(), 0, forward.getX()).normalize().multiply(offset);
-        Location dest = base.clone().add(right);
-        dest.setY(base.getY());
-        dest.setPitch(base.getPitch());
-        dest.setYaw(base.getYaw());
-        return dest;
-    }
-
-    /**
-     * Glide a player-shaped agent toward the owner while either is in water.
-     * @return true if aquatic handling ran (caller should skip land follow)
-     */
-    public static boolean tickPlayerAquaticSwim(OverworldAgent plugin, NPC npc, Entity entity, Player owner) {
-        if (plugin == null || npc == null || entity == null || owner == null || !owner.isOnline()) {
-            return false;
-        }
-        if (entity.getType() != EntityType.PLAYER) {
-            return false;
-        }
-        if (!owner.getWorld().equals(entity.getWorld())) {
-            return false;
-        }
-        boolean aquatic = isAquatic(owner) || isAquatic(entity.getLocation());
-        if (!aquatic) {
-            // Leaving water: restore normal walking gravity if we disabled it.
-            if (!entity.hasGravity()) {
-                entity.setGravity(true);
-            }
-            return false;
-        }
-
-        if (npc.getNavigator().isNavigating()) {
-            npc.getNavigator().cancelNavigation();
-        }
-        entity.setGravity(false);
-
-        Location target = swimBesidePlayer(owner, besideOffset(plugin));
-        if (target == null) {
-            return true;
-        }
-        Location current = entity.getLocation();
-        Vector delta = target.toVector().subtract(current.toVector());
-        double distance = delta.length();
-        if (distance <= 0.4) {
-            entity.setVelocity(new Vector(0, 0, 0));
-            // Hard-correct lingering depth error (teleport-back-but-too-deep).
-            if (Math.abs(current.getY() - target.getY()) > 0.35) {
-                current.setY(target.getY());
-                npc.teleport(current, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
-            }
-            return true;
-        }
-        double speed = plugin.getConfig().getDouble("agent-player-swim-speed", 0.35);
-        entity.setVelocity(delta.normalize().multiply(Math.min(speed, distance)));
-        return true;
     }
 
     /**
@@ -391,7 +238,24 @@ public final class AgentFollowCatchUp {
         }
         if (horizontal > catchUp) {
             teleportBeside(plugin, npc, player);
+            AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
         }
+    }
+
+    /**
+     * Always place the agent beside the owner and restore follow — used after player teleports /
+     * world changes so they are never stacked on the player.
+     */
+    public static void bringBesideOwner(OverworldAgent plugin, NPC npc, Player player) {
+        if (plugin == null || npc == null || player == null || !player.isOnline()) {
+            return;
+        }
+        if (!npc.isSpawned()) {
+            respawnBesideOwner(plugin, npc, player);
+            return;
+        }
+        teleportBeside(plugin, npc, player);
+        AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
     }
 
     /** Despawn (if needed) and spawn beside the owner — used on login after intentional quit despawn. */
@@ -416,12 +280,14 @@ public final class AgentFollowCatchUp {
         return besidePlayer(player, besideOffset(plugin));
     }
 
-    /** Reposition mob agents that Citizens stacked on the owner's head. */
+    /** Reposition agents that Citizens stacked on the owner's position. */
     private static void nudgeOffPlayer(OverworldAgent plugin, NPC npc, Player player) {
         if (npc == null || player == null || !npc.isSpawned() || npc.getEntity() == null) {
             return;
         }
-        if (npc.getEntity().getType() == org.bukkit.entity.EntityType.PLAYER) {
+        if (npc.getEntity().getType() == EntityType.PLAYER) {
+            teleportBeside(plugin, npc, player);
+            AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
             return;
         }
         Location dest = mobSpawnLocation(plugin, player);
@@ -432,16 +298,12 @@ public final class AgentFollowCatchUp {
         if (npc == null || player == null || !player.isOnline()) {
             return;
         }
-        boolean aquatic = isAquatic(player)
-                || (npc.isSpawned() && npc.getEntity() != null && isAquatic(npc.getEntity().getLocation()));
-        Location dest = aquatic
-                ? swimBesidePlayer(player, besideOffset(plugin))
-                : besidePlayer(player, besideOffset(plugin));
+        Location dest = besidePlayer(player, besideOffset(plugin));
         if (dest == null) {
             return;
         }
-        if (!aquatic && npc.isSpawned() && npc.getEntity() != null
-                && npc.getEntity().getType() != org.bukkit.entity.EntityType.PLAYER) {
+        if (npc.isSpawned() && npc.getEntity() != null
+                && npc.getEntity().getType() != EntityType.PLAYER) {
             dest = withMobHoverHeight(plugin, dest, npc.getEntity().getHeight());
         }
         if (!npc.isSpawned()) {
@@ -449,21 +311,15 @@ public final class AgentFollowCatchUp {
             return;
         }
         npc.teleport(dest, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
-        if (!aquatic) {
-            AgentFollowTuning.applyForCurrentEntity(plugin, npc);
-        } else if (npc.getNavigator().isNavigating()) {
-            npc.getNavigator().cancelNavigation();
-        }
+        AgentFollowTuning.applyForCurrentEntity(plugin, npc);
     }
 
-    /** Spawn / respawn location: beside the player; matches player Y in water instead of seabed. */
+    /** Spawn / respawn location: beside the player, same world, feet on ground when possible. */
     public static Location besidePlayer(Player player, double offset) {
         if (player == null || !player.isOnline()) {
             return null;
         }
-        if (isAquatic(player)) {
-            return swimBesidePlayer(player, offset);
-        }
+        double side = Math.max(1.0, offset);
         Location base = player.getLocation();
         World world = base.getWorld();
         Vector forward = base.getDirection();
@@ -473,15 +329,10 @@ public final class AgentFollowCatchUp {
         }
         forward.normalize();
         // Perpendicular "to the right" of where the player is facing.
-        Vector right = new Vector(-forward.getZ(), 0, forward.getX()).normalize().multiply(offset);
+        Vector right = new Vector(-forward.getZ(), 0, forward.getX()).normalize().multiply(side);
         Location dest = base.clone().add(right);
         dest.setPitch(base.getPitch());
         dest.setYaw(base.getYaw());
-        // Prefer the player's Y when the destination column is water (ocean surface / reefs).
-        if (isAquatic(dest) || isAquatic(dest.clone().add(0, 1, 0))) {
-            dest.setY(base.getY());
-            return dest;
-        }
         int groundY = world.getHighestBlockYAt(dest);
         dest.setY(groundY + 1.0);
         return dest;

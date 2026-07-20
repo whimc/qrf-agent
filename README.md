@@ -425,7 +425,7 @@ Agents follow their assigned player using Citizens **`FollowTrait`** + navigator
 | `agent-player-nav-destination-teleport-margin` | `-1` | When `>= 0`, allows snap-teleporting near the final waypoint; `-1` disables (prefer walking). |
 | `agent-player-nav-stationary-ticks` | `1200` | Ticks standing still before navigation cancels as stuck. |
 | `agent-follow-catch-up-distance` | `16.0` | Catch-up teleport only when horizontal distance to the owner exceeds this (blocks). |
-| `agent-follow-catch-up-offset` | `1.5` | How far beside the player catch-up teleports land (blocks). |
+| `agent-follow-catch-up-offset` | `2.0` | How far beside the player catch-up / teleport placement lands (blocks). |
 | `agent-non-player-hover-height` | `2.0` | Blocks above ground that mob agents hover; `0` disables vertical tracking. |
 | `agent-non-player-navigator-speed-modifier` | `1.65` | Speed multiplier for hovering mob agents. |
 | `agent-mob-follow-path-range` / `agent-mob-follow-margin` | `5` / `1.25` | Tighter follow tuning for mob agents. |

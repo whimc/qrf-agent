@@ -28,16 +28,14 @@ agent-non-player-navigator-speed-modifier: 1.65
 agent-player-follow-path-range: 48
 # Distance from followed player at which FollowTrait considers the NPC "close enough" (blocks).
 agent-player-follow-margin: 2.5
-# Player agents: swim-follow speed (blocks/tick) while owner or agent is in water.
-agent-player-swim-speed: 0.35
 # When >= 0, Citizens may snap-teleport the NPC within this distance of the final waypoint; -1 disables (prefer walking).
 agent-player-nav-destination-teleport-margin: -1
 # Ticks the NPC can stand still before navigation is cancelled as STUCK; higher avoids premature cancel on slow paths.
 agent-player-nav-stationary-ticks: 1200
 # When horizontal distance to the owner exceeds this, the agent catch-up teleports beside them (not on top).
 agent-follow-catch-up-distance: 16.0
-# Blocks to the side of the player when catch-up teleporting.
-agent-follow-catch-up-offset: 1.5
+# Blocks to the side of the player when catch-up / teleport placing the agent.
+agent-follow-catch-up-offset: 2.0
 # Mob agents (hovering): tighter path range and margin so they keep up while floating.
 agent-mob-follow-path-range: 5
 agent-mob-follow-margin: 1.25

@@ -25,18 +25,17 @@ public class AgentFollowCatchUpTrait extends net.citizensnpcs.api.trait.Trait {
         if (checkIntervalTicks < 0) {
             checkIntervalTicks = AgentFollowCatchUp.recoveryIntervalTicks(plugin);
         }
-        Player player = AgentFollowCatchUp.followedPlayer(npc);
-        if (player == null || !player.isOnline()) {
-            return;
-        }
-        // Water sync every tick so agents do not sink to the seabed while the owner swims.
-        AgentFollowCatchUp.syncAquaticIfNeeded(plugin, npc, player);
-
         if (++tickCounter < checkIntervalTicks) {
             return;
         }
         tickCounter = 0;
         checkIntervalTicks = AgentFollowCatchUp.recoveryIntervalTicks(plugin);
+        Player player = AgentFollowCatchUp.followedPlayer(npc);
+        if (player == null || !player.isOnline()) {
+            return;
+        }
         AgentFollowCatchUp.recoverIfNeeded(plugin, npc, player);
+        // Nudge off the player if Citizens stacked the agent on top after a teleport/stuck snap.
+        AgentFollowCatchUp.applyIfNeeded(plugin, npc, player);
     }
 }
