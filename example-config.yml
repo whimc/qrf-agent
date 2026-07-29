@@ -217,7 +217,7 @@ template-gui:
     end-your-own-response-speech: "&f&nClick here to stop query"
     guidance-response: "&f&nCan you show me something cool?"
     show-response: "&f&nI want to show you/ask about something unique to this environment!"
-    score-response: "&f&nShow me my scientist scores!"
+    score-response: "&f&nShow me my science scores!"
     build-response: "&f&nI want to build something!"
     agent-edit: "&f&nI want to edit my agent"
   filler-item: white_stained_glass_pane

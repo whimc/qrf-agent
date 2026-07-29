@@ -261,7 +261,7 @@ template-gui:
     custom-response-sign-header: "&f&nYour response"
     end-your-own-response-speech: "&f&nClick here to stop query"
     guidance-response: "&f&nCan you show me something cool?"
-    score-response: "&f&nShow me my scientist scores!"
+    score-response: "&f&nShow me my science scores!"
     build-response: "&f&nI want to build something!"
     agent-edit: "&f&nI want to edit my agent"
   filler-item: white_stained_glass_pane
