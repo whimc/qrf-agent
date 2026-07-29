@@ -261,13 +261,21 @@ prompts:
     feedback: "Sorry I am not sure about this. Try talking to me about something else or maybe ask an instructor about this feature."
 
 template-gui:
+  # When false, hides "Can you show me something cool?" (Journey guidance) from the dialogue menu.
+  show-guidance: true
+  # When false, hides "Look at this!" scene-analysis from the dialogue menu.
+  show-look-at-this: true
+  look-at-this:
+    max-waypoints: 5
+    block-sample-radius: 2
   text:
     see-all-responses: "&f&nI want to see our conversation"
     write-your-own-response: "&f&nI want to discuss something"
     custom-response-sign-header: "&f&nYour response"
     end-your-own-response-speech: "&f&nClick here to stop query"
     guidance-response: "&f&nCan you show me something cool?"
-    score-response: "&f&nShow me my science scores!"
+    look-at-this-response: "&f&nLook at this!"
+    score-response: "&f&nI want to see my science scores!"
     build-response: "&f&nI want to build something!"
     agent-edit: "&f&nI want to edit my agent"
   filler-item: white_stained_glass_pane

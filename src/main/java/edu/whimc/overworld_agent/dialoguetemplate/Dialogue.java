@@ -1257,10 +1257,14 @@ public class Dialogue implements Listener {
                 "&f&nYour response");
         String guidanceResponse = cfg.getString("template-gui.text.guidance-response",
                 "&f&nCan you show me something cool?");
+        String lookAtThisResponse = cfg.getString("template-gui.text.look-at-this-response",
+                "&f&nLook at this!");
         String scoreResponse = cfg.getString("template-gui.text.score-response",
-                "&f&nShow me my science scores!");
+                "&f&nI want to see my science scores!");
         String agentEdit = cfg.getString("template-gui.text.agent-edit",
                 "&f&nI want to edit my agent");
+        boolean showGuidance = cfg.getBoolean("template-gui.show-guidance", true);
+        boolean showLookAtThis = cfg.getBoolean("template-gui.show-look-at-this", true);
 
         // Discussion first (free text → PMML / LLM via chat)
         if (text) {
@@ -1281,10 +1285,19 @@ public class Dialogue implements Listener {
                     });
         }
 
+        if (showLookAtThis) {
+            sendComponent(
+                    player,
+                    "&8" + BULLET + lookAtThisResponse,
+                    "&aClick here — I'll look around and share a science comment",
+                    p -> startLookAtThis()
+            );
+        }
+
         // Agent Guidance Option (async — remaining menu items are sent after this completes)
         Runnable sendMenuTail = () -> sendDialogueMenuTail(cfg, scoreResponse, agentEdit);
 
-        if (Bukkit.getPluginManager().getPlugin("Journey") != null) {
+        if (showGuidance && Bukkit.getPluginManager().getPlugin("Journey") != null) {
             loadSameWorldGuidanceDestinations(player, guidanceChoices -> {
                 List<JourneyWaypointChoice> nearest =
                         nearestGuidanceWaypointSample(player, guidanceChoices, GUIDANCE_NEAREST_LIMIT);
@@ -1302,6 +1315,40 @@ public class Dialogue implements Listener {
             });
         } else {
             sendMenuTail.run();
+        }
+    }
+
+    /**
+     * Gathers nearby Journey/POI/NPC + WorldGuard/biome context and asks the LLM (with RAG) for a
+     * short scientific comment.
+     */
+    private void startLookAtThis() {
+        if (discussionBusy) {
+            Utils.msgNoPrefix(player, ChatColor.GRAY + "Please wait for the previous reply before trying again.");
+            return;
+        }
+        this.spigotCallback.clearCallbacks(player);
+        Consumer<List<JourneyWaypointChoice>> continueWith = choices -> {
+            List<LookAtThisSceneBuilder.NearbyDestination> nearby = new ArrayList<>();
+            if (choices != null) {
+                for (JourneyWaypointChoice c : choices) {
+                    if (c == null || c.location == null) {
+                        continue;
+                    }
+                    nearby.add(new LookAtThisSceneBuilder.NearbyDestination(c.jtKey, c.label, c.location));
+                }
+            }
+            String scene = LookAtThisSceneBuilder.build(plugin, player, nearby);
+            this.response = "Look at this! Please make a short scientific comment about what is around me "
+                    + "right now. Use the scene context below and any relevant reference material. "
+                    + "Keep it conversational and appropriate for learners.\n\n"
+                    + scene;
+            doResponse();
+        };
+        if (Bukkit.getPluginManager().getPlugin("Journey") != null) {
+            loadSameWorldGuidanceDestinations(player, continueWith);
+        } else {
+            continueWith.accept(List.of());
         }
     }
 

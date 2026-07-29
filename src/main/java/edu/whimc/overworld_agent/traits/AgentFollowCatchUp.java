@@ -373,13 +373,14 @@ public final class AgentFollowCatchUp {
         if (npc == null || player == null || !player.isOnline()) {
             return;
         }
-        boolean matchY = ownerNeedsAirFollow(player);
-        Location dest = besidePlayer(player, besideOffset(plugin), matchY);
+        // Always match the owner's feet Y (never world-highest-block — that snaps onto roofs/floors).
+        Location dest = besidePlayer(player, besideOffset(plugin), true);
         if (dest == null) {
             return;
         }
-        if (!matchY && npc.isSpawned() && npc.getEntity() != null
-                && npc.getEntity().getType() != EntityType.PLAYER) {
+        if (npc.isSpawned() && npc.getEntity() != null
+                && npc.getEntity().getType() != EntityType.PLAYER
+                && !ownerNeedsAirFollow(player)) {
             dest = withMobHoverHeight(plugin, dest, npc.getEntity().getHeight());
         }
         if (!npc.isSpawned()) {
@@ -390,18 +391,22 @@ public final class AgentFollowCatchUp {
         AgentFollowTuning.applyForCurrentEntity(plugin, npc);
     }
 
-    /** Spawn / respawn location: beside the player; matches player Y when they are in air/spectator. */
+    /** Spawn / respawn location: beside the player at the player's feet height. */
     public static Location besidePlayer(Player player, double offset) {
-        return besidePlayer(player, offset, ownerNeedsAirFollow(player));
+        return besidePlayer(player, offset, true);
     }
 
+    /**
+     * Horizontal offset beside the player. When {@code matchPlayerY} is true (default for catch-up),
+     * uses the player's feet Y so agents stay on the same level instead of snapping to roofs or
+     * cave floors via {@code getHighestBlockYAt}.
+     */
     public static Location besidePlayer(Player player, double offset, boolean matchPlayerY) {
         if (player == null || !player.isOnline()) {
             return null;
         }
         double side = Math.max(1.0, offset);
         Location base = player.getLocation();
-        World world = base.getWorld();
         Vector forward = base.getDirection();
         forward.setY(0);
         if (forward.lengthSquared() < 1.0E-4) {
@@ -413,12 +418,17 @@ public final class AgentFollowCatchUp {
         Location dest = base.clone().add(right);
         dest.setPitch(base.getPitch());
         dest.setYaw(base.getYaw());
-        if (matchPlayerY) {
-            dest.setY(base.getY());
-            return dest;
+        // Same height as the player (catch-up / spawn). Optional +1 via config if needed later.
+        dest.setY(base.getY());
+        if (!matchPlayerY) {
+            // Legacy ground snap — only when explicitly requested; still clamped near player Y.
+            World world = base.getWorld();
+            int groundY = world.getHighestBlockYAt(dest);
+            // Prefer highest block only if it is within a few blocks of the player (same "floor").
+            if (Math.abs(groundY + 1.0 - base.getY()) <= 3.0) {
+                dest.setY(groundY + 1.0);
+            }
         }
-        int groundY = world.getHighestBlockYAt(dest);
-        dest.setY(groundY + 1.0);
         return dest;
     }
 
