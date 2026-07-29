@@ -3,6 +3,7 @@ package edu.whimc.overworld_agent.traits;
 import edu.whimc.overworld_agent.OverworldAgent;
 import net.citizensnpcs.api.npc.NPC;
 import net.citizensnpcs.trait.FollowTrait;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Entity;
@@ -88,8 +89,9 @@ public final class AgentFollowCatchUp {
     }
 
     /**
-     * Horizontal follow point for hovering mob agents. When the owner is idle, the mob settles in
-     * front of their view (slightly to the side) so it stays clickable; while moving, it trails behind.
+     * Horizontal follow point for hovering mob agents. When the owner is idle, the mob settles to
+     * the side (clickable); while moving, it trails behind. In spectator / flight, tracks the
+     * owner's Y instead of hovering above the ground.
      */
     public static Location mobFollowTarget(OverworldAgent plugin, Player player, double entityHeight) {
         if (player == null || !player.isOnline()) {
@@ -111,16 +113,85 @@ public final class AgentFollowCatchUp {
 
         Location spot;
         if (isPlayerHorizontallyIdle(player, idleSpeed)) {
-            spot = base.clone()
-                    .add(forward.clone().multiply(followDistance))
-                    .add(right.clone().multiply(sideOffset));
+            // Side of the player (stable for clicking) — not continuously chasing look-direction "front".
+            spot = base.clone().add(right.clone().multiply(Math.max(sideOffset, 1.5)));
         } else {
             spot = base.clone().subtract(forward.multiply(followDistance));
+        }
+        if (ownerNeedsAirFollow(player)) {
+            spot.setY(base.getY());
+            return spot;
         }
         if (hover <= 0) {
             return spot;
         }
         return withMobHoverHeight(plugin, spot, entityHeight);
+    }
+
+    /**
+     * True when the owner is not on the ground pathing graph (spectator / creative flight) so
+     * agents should match their air position instead of pathfinding.
+     */
+    public static boolean ownerNeedsAirFollow(Player player) {
+        if (player == null || !player.isOnline()) {
+            return false;
+        }
+        if (player.getGameMode() == GameMode.SPECTATOR) {
+            return true;
+        }
+        return player.isFlying() && !player.isOnGround();
+    }
+
+    /**
+     * Soft-follow a player-shaped agent beside the owner while they are in spectator / flight.
+     * Ground pathfinding cannot track noclip players; NPCs also cannot use true spectator mode.
+     *
+     * @return true if air-follow handled this tick (caller should skip normal land follow)
+     */
+    public static boolean tickPlayerAirFollow(OverworldAgent plugin, NPC npc, Entity entity, Player owner) {
+        if (plugin == null || npc == null || entity == null || owner == null || !owner.isOnline()) {
+            return false;
+        }
+        if (entity.getType() != EntityType.PLAYER) {
+            return false;
+        }
+        if (!owner.getWorld().equals(entity.getWorld())) {
+            return false;
+        }
+        if (!ownerNeedsAirFollow(owner)) {
+            if (!entity.hasGravity()) {
+                entity.setGravity(true);
+            }
+            return false;
+        }
+
+        if (npc.getNavigator().isNavigating()) {
+            npc.getNavigator().cancelNavigation();
+        }
+        entity.setGravity(false);
+
+        Location target = besidePlayer(owner, besideOffset(plugin), true);
+        if (target == null) {
+            return true;
+        }
+        Location current = entity.getLocation();
+        Vector delta = target.toVector().subtract(current.toVector());
+        double distance = delta.length();
+        if (distance <= 0.5) {
+            entity.setVelocity(new Vector(0, 0, 0));
+            if (distance > 0.15) {
+                npc.teleport(target, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
+            }
+            return true;
+        }
+        double speed = plugin.getConfig().getDouble("agent-player-air-follow-speed", 0.45);
+        if (distance > 12.0) {
+            npc.teleport(target, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.PLUGIN);
+            entity.setVelocity(new Vector(0, 0, 0));
+            return true;
+        }
+        entity.setVelocity(delta.normalize().multiply(Math.min(speed, distance)));
+        return true;
     }
 
     /**
@@ -161,10 +232,14 @@ public final class AgentFollowCatchUp {
 
     /** True when the owner is not moving horizontally (standing still, looking around). */
     private static boolean isPlayerHorizontallyIdle(Player player, double maxHorizontalSpeed) {
-        if (player.isGliding() || player.isRiptiding() || player.isFlying()) {
+        if (player.getVehicle() != null) {
             return false;
         }
-        if (player.getVehicle() != null) {
+        if (player.isGliding() || player.isRiptiding()) {
+            return false;
+        }
+        // Spectators always "fly"; only treat them as moving when velocity says so.
+        if (player.getGameMode() != GameMode.SPECTATOR && player.isFlying()) {
             return false;
         }
         Vector velocity = player.getVelocity();
@@ -298,11 +373,12 @@ public final class AgentFollowCatchUp {
         if (npc == null || player == null || !player.isOnline()) {
             return;
         }
-        Location dest = besidePlayer(player, besideOffset(plugin));
+        boolean matchY = ownerNeedsAirFollow(player);
+        Location dest = besidePlayer(player, besideOffset(plugin), matchY);
         if (dest == null) {
             return;
         }
-        if (npc.isSpawned() && npc.getEntity() != null
+        if (!matchY && npc.isSpawned() && npc.getEntity() != null
                 && npc.getEntity().getType() != EntityType.PLAYER) {
             dest = withMobHoverHeight(plugin, dest, npc.getEntity().getHeight());
         }
@@ -314,8 +390,12 @@ public final class AgentFollowCatchUp {
         AgentFollowTuning.applyForCurrentEntity(plugin, npc);
     }
 
-    /** Spawn / respawn location: beside the player, same world, feet on ground when possible. */
+    /** Spawn / respawn location: beside the player; matches player Y when they are in air/spectator. */
     public static Location besidePlayer(Player player, double offset) {
+        return besidePlayer(player, offset, ownerNeedsAirFollow(player));
+    }
+
+    public static Location besidePlayer(Player player, double offset, boolean matchPlayerY) {
         if (player == null || !player.isOnline()) {
             return null;
         }
@@ -333,6 +413,10 @@ public final class AgentFollowCatchUp {
         Location dest = base.clone().add(right);
         dest.setPitch(base.getPitch());
         dest.setYaw(base.getYaw());
+        if (matchPlayerY) {
+            dest.setY(base.getY());
+            return dest;
+        }
         int groundY = world.getHighestBlockYAt(dest);
         dest.setY(groundY + 1.0);
         return dest;

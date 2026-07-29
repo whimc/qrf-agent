@@ -36,9 +36,16 @@ agent-player-nav-stationary-ticks: 1200
 agent-follow-catch-up-distance: 16.0
 # Blocks to the side of the player when catch-up / teleport placing the agent.
 agent-follow-catch-up-offset: 2.0
+# Player agents: soft-follow speed (blocks/tick) while the owner is in spectator or creative flight.
+agent-player-air-follow-speed: 0.45
 # Mob agents (hovering): tighter path range and margin so they keep up while floating.
 agent-mob-follow-path-range: 5
 agent-mob-follow-margin: 1.25
+# When the owner is stopped, mob agents settle this far to the side (for clicking).
+agent-mob-idle-side-offset: 1.5
+# How far the owner must move before a locked idle settle spot is recomputed.
+agent-mob-idle-lock-move-blocks: 0.75
+agent-mob-idle-stop-distance: 0.85
 # LLM chat: provider + API key (or api-key-env). Requires outbound HTTPS for cloud providers; local uses llm.base-url.
 llm:
   use-for-reply: false

@@ -416,7 +416,8 @@ Opened from the main dialogue menu (or by right-clicking a `rebuilderspawn` NPC)
 Agents follow their assigned player using Citizens **`FollowTrait`** + navigator pathfinding, tuned per entity type by `AgentFollowTuning`:
 
 - **Player-shaped agents** use normal gravity and **A\* pathfinding, so they WALK** after the player (straight-line steering is disabled â€” it made them glide over terrain instead of walking). They re-attach follow on respawn, world change, and player rejoin.
-- **Animal/mob agents** hover at a configurable height above the ground (no gravity) and steer more directly so they keep up while floating.
+- **Animal/mob agents** hover at a configurable height above the ground (no gravity). While the owner is idle they settle to the side and **hold still** (looking around does not make them orbit); while moving they trail behind. In spectator / flight they match the owner's height.
+- **Spectator / flight:** Player agents cannot use true spectator mode; they soft-follow beside the owner at matching height instead of ground pathfinding.
 
 | Config key | Default | Description |
 |------------|---------|-------------|

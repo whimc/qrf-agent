@@ -64,19 +64,25 @@ agent-player-nav-stationary-ticks: 1200
 agent-follow-catch-up-distance: 16.0
 # Blocks to the side of the player when catch-up / teleport placing the agent.
 agent-follow-catch-up-offset: 2.0
+# Player agents: soft-follow speed (blocks/tick) while the owner is in spectator or creative flight.
+agent-player-air-follow-speed: 0.45
 # How often (seconds) to check whether a spawned agent is in another world or lost (void / too far).
 agent-follow-recovery-interval-seconds: 10
 # Same-world recovery when vertical separation exceeds this (e.g. agent fell into void below).
 agent-follow-recovery-max-vertical: 32.0
 # Mob agents (hovering): preferred horizontal distance behind the player while moving.
 agent-mob-follow-distance: 3.5
-# When the owner is stopped, mob agents settle this far in front of their view (plus side offset).
+# When the owner is stopped, mob agents settle this far to the side (for clicking).
 agent-mob-idle-side-offset: 1.5
 # Max horizontal velocity (blocks/tick) to treat the owner as idle for mob settle positioning.
 agent-mob-idle-settle-speed: 0.08
+# How far the owner must move (blocks) before a locked idle settle spot is recomputed.
+agent-mob-idle-lock-move-blocks: 0.75
+# Stop distance while idle (larger = hold still sooner / less micro-jitter).
+agent-mob-idle-stop-distance: 0.85
 # Blocks per tick for mob glide speed (Paper velocity cap applies).
 agent-mob-follow-speed: 0.32
-# Stop gliding when within this distance of the follow target.
+# Stop gliding when within this distance of the follow target (while moving).
 agent-mob-follow-stop-distance: 0.35
 # Mob agents (hovering): navigator safety settings (movement is handled by AgentPermanentFlyingTrait).
 agent-mob-follow-path-range: 24
