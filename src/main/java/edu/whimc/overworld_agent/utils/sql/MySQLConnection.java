@@ -3,6 +3,8 @@ package edu.whimc.overworld_agent.utils.sql;
 import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.utils.sql.migration.SchemaManager;
 
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
@@ -92,20 +94,47 @@ public class MySQLConnection {
         }
     }
 
+    /**
+     * Returns the shared plugin connection. Callers often use try-with-resources; closing the returned
+     * handle is a no-op so concurrent Queryer work does not tear down the shared JDBC connection.
+     */
     public Connection getConnection() {
         try {
-            if (this.connection != null && !this.connection.isClosed()) {
-                return this.connection;
+            if (this.connection == null || this.connection.isClosed()) {
+                this.connection = DriverManager.getConnection(this.url, this.username, this.password);
+                try (Statement statement = this.connection.createStatement()) {
+                    statement.execute("SET NAMES utf8mb4");
+                }
             }
-            this.connection = DriverManager.getConnection(this.url, this.username, this.password);
-            try (Statement statement = this.connection.createStatement()) {
-                statement.execute("SET NAMES utf8mb4");
-            }
+            return uncloseable(this.connection);
         } catch (SQLException ignored) {
             return null;
         }
+    }
 
-        return this.connection;
+    private static Connection uncloseable(Connection real) {
+        InvocationHandler handler = (proxy, method, args) -> {
+            String name = method.getName();
+            if ("close".equals(name)) {
+                return null;
+            }
+            if ("isClosed".equals(name)) {
+                return real.isClosed();
+            }
+            try {
+                return method.invoke(real, args);
+            } catch (java.lang.reflect.InvocationTargetException ex) {
+                Throwable cause = ex.getCause();
+                if (cause instanceof Exception exception) {
+                    throw exception;
+                }
+                throw ex;
+            }
+        };
+        return (Connection) Proxy.newProxyInstance(
+                Connection.class.getClassLoader(),
+                new Class<?>[] {Connection.class},
+                handler);
     }
 
 }

@@ -325,6 +325,8 @@ public class BuilderDialogue {
     public int getId(){return id;}
     private void sendComponent(Player player, String text, String hoverText, Consumer<Player> onClick) {
         player.spigot().sendMessage(createComponent(text, hoverText, onClick));
+        // Blank line between options so beginner mouse users have more space to click.
+        player.sendMessage("");
     }
 
     private TextComponent createComponent(String text, String hoverText, Consumer<Player> onClick) {

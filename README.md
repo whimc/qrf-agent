@@ -104,9 +104,9 @@ RAG (retrieval-augmented generation) here means: **optional** inclusion of plain
 | `llm.rag.enabled` | When `true`, scans that directory and appends bounded excerpts to the system prompt before each completion. |
 | `llm.rag.max-total-chars` / `max-file-chars` | Cap total and per-file bytes so prompts stay reasonable. |
 | `llm.rag.max-directory-depth` | How deep to walk subfolders. |
-| `llm.rag.include-extensions` | File extensions to read (default `txt`, `md`, `doc`, `docx`). Word files are converted to plain text via Apache POI. |
+| `llm.rag.include-extensions` | File extensions to read (default `txt`, `md`, `doc`, `docx`, `yml`, `yaml`). Word files use Apache POI; Citizens NPC YAML is summarized to dialogue/labels/locations. |
 
-Put glossaries, world lore, or lesson snippets as `.md`, `.txt`, `.doc`, or `.docx` files there. See [docs/llm-rag.md](docs/llm-rag.md) for behavior details.
+Put glossaries, world lore, or lesson snippets as `.md`, `.txt`, `.doc`, `.docx`, or `.yml`/`.yaml` files there. See [docs/llm-rag.md](docs/llm-rag.md) for behavior details.
 
 #### Per-world prompts (`world-prompts/`)
 
@@ -171,6 +171,41 @@ llm:
     radius: 25.0
     max-items: 3
 ```
+
+#### Learner activity context (`llm.activity-context`)
+
+When enabled, each LLM turn (dialogue **Discuss something** with `llm.use-for-reply`, and `/agent chat test`) queries the same MySQL DB as `mysql:` and appends a short snapshot for grounding directions. Live player location is included; position history is **summarized** (not every 2-second sample).
+
+| Table | What is injected |
+|-------|------------------|
+| `whimc_progress` | Latest component scores (observation, tools, exploration, quest, POI, overall) |
+| `whimc_player_positions` | Recent path summarized to biomes / hotspots |
+| `whimc_sciencetools` | Recent measurements for this player |
+| `whimc_observations` | This player's recent active observations + nearby peers' public ones |
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `llm.activity-context.enabled` | `false` | Turn on live activity injection |
+| `llm.activity-context.max-own-observations` | `10` | Cap for this player's recent observations |
+| `llm.activity-context.max-peer-observations` | `10` | Cap for nearby peer observations |
+| `llm.activity-context.nearby-observation-radius` | `80` | Peer observation search radius (blocks) |
+| `llm.activity-context.include-peer-observations` | `true` | Include other students' nearby observations |
+| `llm.activity-context.max-science-tools` | `12` | Cap for recent science-tool readings |
+| `llm.activity-context.position-lookback-ms` | `900000` | How far back to read positions (15 min) |
+| `llm.activity-context.position-row-limit` | `200` | Max position rows fetched before summarizing |
+| `llm.activity-context.include-progress` | `true` | Include latest `whimc_progress` scores |
+
+Example:
+
+```yaml
+llm:
+  activity-context:
+    enabled: true
+    include-peer-observations: true
+    nearby-observation-radius: 80
+```
+
+See also [docs/llm-rag.md](docs/llm-rag.md#learner-activity-context) (related live context, not file RAG).
 
 #### Example configs
 
@@ -245,11 +280,11 @@ Separate from embodied right-click dialogue and from `llm.use-for-reply` on the 
 **In-session behavior**
 
 1. Player runs `/agent chat test`.
-2. Each chat line is intercepted (public chat is cancelled; the player sees a private `You: â€¦` echo).
-3. The plugin builds a system prompt from `llm.system-prompt`, optional **RAG** (`llm.rag`), and optional **nearby NPC context** (`llm.npc-context`).
+2. Each chat line is intercepted (public chat is cancelled; the player sees a private `You: …` echo).
+3. The plugin builds a system prompt from world/`llm.system-prompt`, optional **RAG** (`llm.rag`), optional **nearby NPC context** (`llm.npc-context`), and optional **learner activity** (`llm.activity-context`).
 4. Up to **10** prior user/assistant lines in the session are prepended to the user message for short-term memory.
-5. The LLM runs **async**; the player sees `Thinkingâ€¦` then the assistant reply.
-6. Type **`exit`**, **`quit`**, **`stop`**, or run `/agent chat end` to leave the mode.
+5. The LLM runs **async**; the player sees `Thinking…` then the assistant reply.
+6. Type **`exit`**, **`quit`**, **`stop`**, or run `/agent chat end` to leave the mode. Quitting the server also ends the session.
 
 **Requirements:** MySQL configured and reachable (schema migration **8** creates chat research tables). Provider must be configured (`llm.provider` + key/model or `base-url` for local).
 
@@ -261,7 +296,7 @@ Each turn from **`/agent chat test`** and from **dialogue free discussion** (Dis
 |-------|---------|
 | `whimc_agent_chat_conversations` | One row per interactive session. |
 | `whimc_agent_chat_turns` | User message, assistant response, provider metadata, timing. |
-| `whimc_agent_chat_context_items` | Nearby NPC context rows attached to a turn. |
+| `whimc_agent_chat_context_items` | Nearby NPC / learner-activity context rows attached to a turn (interactive chat). |
 | `whimc_agent_chat_events` | Stage/trace events (LLM call, RAG, failures). |
 | `whimc_agent_chat_retrieved_chunks` | Reserved for RAG chunk metadata when populated. |
 
@@ -281,6 +316,8 @@ llm:
     enabled: true
     radius: 25.0
     max-items: 3
+  activity-context:
+    enabled: true
 ```
 
 Then in-game: `/agent chat test` â†’ type messages in chat â†’ `/agent chat end` when finished.
@@ -350,7 +387,8 @@ The main menu lists **free discussion first** ("I want to discuss something"), t
 | Dialogue option | Description |
 |-----------------|-------------|
 | Free discussion | **First option** in the menu. **Ongoing AI chat mode**: clicking toggles chat mode on and every chat message is routed to the agent through **`doResponse()`** (PMML intent by default; **`llm.use-for-reply`** when an `LlmProvider` is configured, with short-term conversation history). Type **`stop`** or **`exit`** in chat to end the session. |
-| Guidance ("something cool") | If **Journey** is present: shows a **random subset** (3–5 when available) of **server public** waypoints and **`poi-*` regions** from **portal-linked worlds** (same name prefix, e.g. `ColderCold` / `ColderHot` / `ColderStrip` share `Colder`; override with `journey.linked-world-prefix`). POI regions come from WorldGuard and/or `rg_region` in MySQL (`journey.poi-source`: `worldguard`, `database`, or `both`). Each choice runs **`/<journey-command-root> server waypoint <name_id>`** as the player. Set **`journey.debug-log: true`** for linked-world and source counts in console. Falls back to all public waypoints, then **chat** entry, if nothing matches. |
+| Look at this! | Gathers a live **scene summary** (biome, nearby blocks, WorldGuard regions at the player's feet, nearby Journey `poi-*` / `npc-*` destinations) and asks the LLM (with world RAG) for a short scientific comment. Toggle with **`template-gui.show-look-at-this`**. |
+| Guidance ("something cool") | If **Journey** is present and **`template-gui.show-guidance`** is true: shows the **3 nearest** **`poi-*` / `npc-*`** destinations on the player's **current world**. Each choice runs Journey navigation as the player. Falls back to **chat** entry if none are nearby. |
 | Scores | Runs **`/progress`** (e.g. **WHIMC-StudentFeedback**); session is ensured when possible. |
 | Build ("I want to build something!") | Opens the **builder menu** (templates, demo builds, base feedback — see Builder table below); no mode switch needed. |
 | Edit | **Embodied** agents only: change **name**, **entity type** (`player` vs Animals list), and **skin** when the NPC is a **player** model (up to configured edit limits). |
@@ -379,7 +417,8 @@ Opened from the main dialogue menu (or by right-clicking a `rebuilderspawn` NPC)
 Agents follow their assigned player using Citizens **`FollowTrait`** + navigator pathfinding, tuned per entity type by `AgentFollowTuning`:
 
 - **Player-shaped agents** use normal gravity and **A\* pathfinding, so they WALK** after the player (straight-line steering is disabled â€” it made them glide over terrain instead of walking). They re-attach follow on respawn, world change, and player rejoin.
-- **Animal/mob agents** hover at a configurable height above the ground (no gravity) and steer more directly so they keep up while floating.
+- **Animal/mob agents** hover at a configurable height above the ground (no gravity). While the owner is idle they settle to the side and **hold still** (looking around does not make them orbit); while moving they trail behind. In spectator / flight they match the owner's height.
+- **Spectator / flight:** Player agents cannot use true spectator mode; they soft-follow beside the owner at matching height instead of ground pathfinding.
 
 | Config key | Default | Description |
 |------------|---------|-------------|
@@ -388,7 +427,7 @@ Agents follow their assigned player using Citizens **`FollowTrait`** + navigator
 | `agent-player-nav-destination-teleport-margin` | `-1` | When `>= 0`, allows snap-teleporting near the final waypoint; `-1` disables (prefer walking). |
 | `agent-player-nav-stationary-ticks` | `1200` | Ticks standing still before navigation cancels as stuck. |
 | `agent-follow-catch-up-distance` | `16.0` | Catch-up teleport only when horizontal distance to the owner exceeds this (blocks). |
-| `agent-follow-catch-up-offset` | `1.5` | How far beside the player catch-up teleports land (blocks). |
+| `agent-follow-catch-up-offset` | `2.0` | How far beside the player catch-up / teleport placement lands (blocks). |
 | `agent-non-player-hover-height` | `2.0` | Blocks above ground that mob agents hover; `0` disables vertical tracking. |
 | `agent-non-player-navigator-speed-modifier` | `1.65` | Speed multiplier for hovering mob agents. |
 | `agent-mob-follow-path-range` / `agent-mob-follow-margin` | `5` / `1.25` | Tighter follow tuning for mob agents. |

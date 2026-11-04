@@ -51,7 +51,14 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
         }
 
         if (plugin.getAgents().containsKey(player.getName())) {
-            player.sendMessage("You already have an AI friend. You can change their name by right clicking on them.");
+            if (AgentFollowCatchUp.respawnOwnedIfDespawned(plugin, player)) {
+                player.sendMessage("Your AI friend is back beside you.");
+                return true;
+            }
+            NPC existing = plugin.getAgents().get(player.getName());
+            player.sendMessage("You already have an AI friend at "
+                    + AgentFollowCatchUp.describeAgentLocation(existing)
+                    + ". Change their name by right clicking them, or /agent destroy to remove them.");
             return true;
         }
 
@@ -252,7 +259,12 @@ public class ExpertSpawnCommand extends AbstractSubCommand {
     ) {
         if (plugin.getAgents().containsKey(player.getName())) {
             npc.destroy();
-            player.sendMessage("You already have an AI friend.");
+            if (AgentFollowCatchUp.respawnOwnedIfDespawned(plugin, player)) {
+                player.sendMessage("Your AI friend is back beside you.");
+                return;
+            }
+            player.sendMessage("You already have an AI friend at "
+                    + AgentFollowCatchUp.describeAgentLocation(plugin.getAgents().get(player.getName())) + ".");
             return;
         }
 

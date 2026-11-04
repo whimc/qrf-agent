@@ -43,7 +43,7 @@ public final class LlmRagContextBuilder {
         int maxDepth = cfg.getInt("llm.rag.max-directory-depth", 6);
         List<String> extensions = cfg.getStringList("llm.rag.include-extensions");
         if (extensions == null || extensions.isEmpty()) {
-            extensions = List.of("txt", "md", "doc", "docx");
+            extensions = List.of("txt", "md", "doc", "docx", "yml", "yaml");
         }
         List<String> normalizedExt = extensions.stream()
                 .map(e -> e.toLowerCase(Locale.ROOT).replace(".", ""))
@@ -131,7 +131,7 @@ public final class LlmRagContextBuilder {
         int maxDepth = cfg.getInt("llm.rag.max-directory-depth", 6);
         List<String> extensions = cfg.getStringList("llm.rag.include-extensions");
         if (extensions == null || extensions.isEmpty()) {
-            extensions = List.of("txt", "md", "doc", "docx");
+            extensions = List.of("txt", "md", "doc", "docx", "yml", "yaml");
         }
         List<String> normalizedExt = extensions.stream()
                 .map(e -> e.toLowerCase(Locale.ROOT).replace(".", ""))

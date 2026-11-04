@@ -7,6 +7,13 @@ import edu.whimc.overworld_agent.dialoguetemplate.JourneyGuidanceCatalog;
 import edu.whimc.overworld_agent.dialoguetemplate.models.BuildTemplate;
 import edu.whimc.overworld_agent.llm.context.AgentChatContextItem;
 import edu.whimc.overworld_agent.llm.context.AgentChatEvent;
+import edu.whimc.overworld_agent.llm.context.LearnerActivityContextProvider;
+import edu.whimc.overworld_agent.llm.context.LearnerActivitySnapshot;
+import edu.whimc.overworld_agent.llm.context.LearnerActivitySnapshot.ObservationRow;
+import edu.whimc.overworld_agent.llm.context.LearnerActivitySnapshot.PositionSample;
+import edu.whimc.overworld_agent.llm.context.LearnerActivitySnapshot.PositionSummary;
+import edu.whimc.overworld_agent.llm.context.LearnerActivitySnapshot.ProgressScore;
+import edu.whimc.overworld_agent.llm.context.LearnerActivitySnapshot.ScienceToolRow;
 import net.citizensnpcs.api.npc.NPC;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -17,6 +24,7 @@ import org.bukkit.entity.Player;
 import java.awt.*;
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -121,6 +129,32 @@ public class Queryer {
             "SELECT r.id, w.name AS world_name FROM %sregion r "
                     + "INNER JOIN %sworld w ON r.world_id = w.id "
                     + "WHERE r.id LIKE ? AND w.name LIKE ?";
+
+    private static final String QUERY_LATEST_PROGRESS =
+            "SELECT observation, science_tools, exploration, quest, score, poi_exploration, time "
+                    + "FROM whimc_progress WHERE uuid = ? ORDER BY time DESC LIMIT 1";
+
+    private static final String QUERY_OWN_OBSERVATIONS =
+            "SELECT observation_color_stripped, observation, x, y, z, world, time, category, username "
+                    + "FROM whimc_observations WHERE uuid = ? AND active = 1 "
+                    + "AND (expiration IS NULL OR expiration <= 0 OR expiration > ?) "
+                    + "ORDER BY time DESC LIMIT ?";
+
+    /** Any active floating observation near the player (own or peer). */
+    private static final String QUERY_NEARBY_OBSERVATIONS =
+            "SELECT observation_color_stripped, observation, x, y, z, world, time, category, username, uuid "
+                    + "FROM whimc_observations WHERE LOWER(world) = LOWER(?) AND active = 1 "
+                    + "AND (expiration IS NULL OR expiration <= 0 OR expiration > ?) "
+                    + "AND x BETWEEN ? AND ? AND z BETWEEN ? AND ? "
+                    + "ORDER BY time DESC LIMIT ?";
+
+    private static final String QUERY_RECENT_SCIENCE_TOOLS =
+            "SELECT tool, measurement, x, y, z, world, time FROM whimc_sciencetools "
+                    + "WHERE uuid = ? ORDER BY time DESC LIMIT ?";
+
+    private static final String QUERY_RECENT_POSITIONS =
+            "SELECT x, y, z, world, biome, time FROM whimc_player_positions "
+                    + "WHERE uuid = ? AND time >= ? ORDER BY time DESC LIMIT ?";
 
     private final OverworldAgent plugin;
     private final MySQLConnection sqlConnection;
@@ -858,6 +892,249 @@ public class Queryer {
 
     private void async(Runnable runnable) {
         Bukkit.getScheduler().runTaskAsynchronously(this.plugin, runnable);
+    }
+
+    /**
+     * Loads learner activity from WHIMC research tables for LLM grounding.
+     * Callback runs on the main thread. Missing tables yield empty sections (logged once per failure).
+     */
+    public void loadLearnerActivityContext(
+            Player player,
+            LearnerActivityContextProvider.QueryOptions options,
+            Consumer<LearnerActivitySnapshot> callback
+    ) {
+        if (callback == null) {
+            return;
+        }
+        if (player == null || options == null) {
+            sync(callback, LearnerActivitySnapshot.empty());
+            return;
+        }
+
+        final String uuid = player.getUniqueId().toString();
+        final Location loc = player.getLocation();
+        final String worldName = loc.getWorld() == null ? "" : loc.getWorld().getName();
+        final double px = loc.getX();
+        final double py = loc.getY();
+        final double pz = loc.getZ();
+        final long now = System.currentTimeMillis();
+
+        async(() -> {
+            ProgressScore progress = null;
+            List<ObservationRow> ownObservations = List.of();
+            List<ObservationRow> peerObservations = List.of();
+            List<ScienceToolRow> scienceTools = List.of();
+            PositionSummary positionSummary = null;
+
+            try (Connection connection = this.sqlConnection.getConnection()) {
+                if (connection == null) {
+                    sync(callback, LearnerActivitySnapshot.empty());
+                    return;
+                }
+
+                if (options.includeProgress()) {
+                    progress = queryLatestProgress(connection, uuid);
+                }
+                if (options.maxOwnObservations() > 0) {
+                    ownObservations = queryOwnObservations(connection, uuid, now, options.maxOwnObservations());
+                }
+                if (options.includePeerObservations() && options.maxPeerObservations() > 0 && !worldName.isBlank()) {
+                    peerObservations = queryNearbyObservations(
+                            connection,
+                            uuid,
+                            worldName,
+                            px,
+                            py,
+                            pz,
+                            now,
+                            options.nearbyObservationRadius(),
+                            options.maxPeerObservations());
+                }
+                if (options.maxScienceTools() > 0) {
+                    scienceTools = queryRecentScienceTools(connection, uuid, options.maxScienceTools());
+                }
+                List<PositionSample> samples = queryRecentPositions(
+                        connection,
+                        uuid,
+                        now - options.positionLookbackMs(),
+                        options.positionRowLimit());
+                positionSummary = LearnerActivityContextProvider.summarizePositions(samples, 5, 5);
+            } catch (SQLException exc) {
+                plugin.getLogger().warning("Failed to load learner activity context: " + exc.getMessage());
+            }
+
+            if (plugin.getConfig().getBoolean("llm.debug-log", false)) {
+                plugin.getLogger().info(String.format(
+                        Locale.ROOT,
+                        "[OverworldAgent][LLM] activity-context load uuid=%s world=%s ownObs=%d nearbyObs=%d tools=%d positions=%s progress=%s",
+                        uuid,
+                        worldName,
+                        ownObservations.size(),
+                        peerObservations.size(),
+                        scienceTools.size(),
+                        positionSummary == null || positionSummary.isEmpty() ? "empty" : "ok",
+                        progress == null ? "none" : "ok"));
+            }
+
+            sync(callback, new LearnerActivitySnapshot(
+                    progress,
+                    positionSummary,
+                    ownObservations,
+                    peerObservations,
+                    scienceTools));
+        });
+    }
+
+    private ProgressScore queryLatestProgress(Connection connection, String uuid) {
+        try (PreparedStatement statement = connection.prepareStatement(QUERY_LATEST_PROGRESS)) {
+            statement.setString(1, uuid);
+            try (ResultSet results = statement.executeQuery()) {
+                if (!results.next()) {
+                    return null;
+                }
+                return new ProgressScore(
+                        results.getDouble("observation"),
+                        results.getDouble("science_tools"),
+                        results.getDouble("exploration"),
+                        results.getDouble("quest"),
+                        results.getDouble("poi_exploration"),
+                        results.getDouble("score"),
+                        results.getLong("time"));
+            }
+        } catch (SQLException exc) {
+            plugin.getLogger().warning("activity-context: whimc_progress query failed: " + exc.getMessage());
+            return null;
+        }
+    }
+
+    private List<ObservationRow> queryOwnObservations(Connection connection, String uuid, long now, int limit) {
+        List<ObservationRow> out = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(QUERY_OWN_OBSERVATIONS)) {
+            statement.setString(1, uuid);
+            statement.setLong(2, now);
+            statement.setInt(3, limit);
+            try (ResultSet results = statement.executeQuery()) {
+                while (results.next()) {
+                    out.add(readObservation(results, null));
+                }
+            }
+        } catch (SQLException exc) {
+            plugin.getLogger().warning("activity-context: whimc_observations (own) query failed: " + exc.getMessage());
+        }
+        return out;
+    }
+
+    private List<ObservationRow> queryNearbyObservations(
+            Connection connection,
+            String uuid,
+            String worldName,
+            double px,
+            double py,
+            double pz,
+            long now,
+            double radius,
+            int limit
+    ) {
+        List<ObservationRow> candidates = new ArrayList<>();
+        // Wider recent fetch, then keep nearest (time-first SQL can miss a close older hologram).
+        int fetchLimit = Math.max(limit * 8, 80);
+        try (PreparedStatement statement = connection.prepareStatement(QUERY_NEARBY_OBSERVATIONS)) {
+            statement.setString(1, worldName);
+            statement.setLong(2, now);
+            statement.setDouble(3, px - radius);
+            statement.setDouble(4, px + radius);
+            statement.setDouble(5, pz - radius);
+            statement.setDouble(6, pz + radius);
+            statement.setInt(7, fetchLimit);
+            try (ResultSet results = statement.executeQuery()) {
+                while (results.next()) {
+                    double x = results.getDouble("x");
+                    double y = results.getDouble("y");
+                    double z = results.getDouble("z");
+                    double dx = x - px;
+                    double dy = y - py;
+                    double dz = z - pz;
+                    double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                    if (distance > radius) {
+                        continue;
+                    }
+                    candidates.add(readObservation(results, distance));
+                }
+            }
+        } catch (SQLException exc) {
+            plugin.getLogger().warning("activity-context: whimc_observations (nearby) query failed: " + exc.getMessage());
+            return List.of();
+        }
+        candidates.sort(Comparator.comparingDouble(o -> o.distance() == null ? Double.MAX_VALUE : o.distance()));
+        if (candidates.size() <= limit) {
+            return candidates;
+        }
+        return new ArrayList<>(candidates.subList(0, limit));
+    }
+
+    private ObservationRow readObservation(ResultSet results, Double distance) throws SQLException {
+        String stripped = results.getString("observation_color_stripped");
+        String raw = results.getString("observation");
+        String text = (stripped != null && !stripped.isBlank()) ? stripped : raw;
+        if (text != null) {
+            text = ChatColor.stripColor(text.replace('&', ChatColor.COLOR_CHAR));
+        }
+        return new ObservationRow(
+                text == null ? "" : text.trim(),
+                results.getString("username"),
+                results.getString("world"),
+                results.getDouble("x"),
+                results.getDouble("y"),
+                results.getDouble("z"),
+                results.getString("category"),
+                results.getLong("time"),
+                distance);
+    }
+
+    private List<ScienceToolRow> queryRecentScienceTools(Connection connection, String uuid, int limit) {
+        List<ScienceToolRow> out = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(QUERY_RECENT_SCIENCE_TOOLS)) {
+            statement.setString(1, uuid);
+            statement.setInt(2, limit);
+            try (ResultSet results = statement.executeQuery()) {
+                while (results.next()) {
+                    out.add(new ScienceToolRow(
+                            results.getString("tool"),
+                            results.getString("measurement"),
+                            results.getString("world"),
+                            results.getDouble("x"),
+                            results.getDouble("y"),
+                            results.getDouble("z"),
+                            results.getLong("time")));
+                }
+            }
+        } catch (SQLException exc) {
+            plugin.getLogger().warning("activity-context: whimc_sciencetools query failed: " + exc.getMessage());
+        }
+        return out;
+    }
+
+    private List<PositionSample> queryRecentPositions(Connection connection, String uuid, long sinceTime, int limit) {
+        List<PositionSample> out = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(QUERY_RECENT_POSITIONS)) {
+            statement.setString(1, uuid);
+            statement.setLong(2, sinceTime);
+            statement.setInt(3, limit);
+            try (ResultSet results = statement.executeQuery()) {
+                while (results.next()) {
+                    out.add(new PositionSample(
+                            results.getInt("x"),
+                            results.getInt("y"),
+                            results.getInt("z"),
+                            results.getString("world"),
+                            results.getString("biome"),
+                            results.getLong("time")));
+                }
+            }
+        } catch (SQLException exc) {
+            plugin.getLogger().warning("activity-context: whimc_player_positions query failed: " + exc.getMessage());
+        }
+        return out;
     }
 
     /**

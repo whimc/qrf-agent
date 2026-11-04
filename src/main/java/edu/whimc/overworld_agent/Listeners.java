@@ -1,7 +1,7 @@
 package edu.whimc.overworld_agent;
 
+import edu.whimc.overworld_agent.traits.AgentFollowCatchUp;
 import edu.whimc.overworld_agent.traits.AgentFollowCatchUpTrait;
-import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import net.citizensnpcs.api.CitizensAPI;
 import net.citizensnpcs.api.npc.NPC;
@@ -13,7 +13,9 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityMountEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerChangedWorldEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -78,13 +80,62 @@ public class Listeners  implements Listener {
         HashMap<Player,HashMap<String, Integer>> agentEdits = plugin.getAgentEdits();
         agentEdits.putIfAbsent(player, edits);
         plugin.relinkOwnedAgent(player);
-        Map<String, NPC> agents = plugin.getAgents();
-        NPC npc = agents.get(player.getName());
-        if (npc != null) {
+        recoverPlayerAgent(player, 1L, false);
+    }
+
+    /**
+     * Place the agent beside the player after join / world change / teleport; respawn if despawned.
+     * @param forceBeside when true, always snap beside (teleport/world change); when false, only if lost
+     */
+    private void recoverPlayerAgent(Player player, long delayTicks, boolean forceBeside) {
+        Runnable recover = () -> {
+            if (!player.isOnline()) {
+                return;
+            }
+            plugin.relinkOwnedAgent(player);
+            NPC npc = plugin.getAgents().get(player.getName());
+            if (npc == null) {
+                return;
+            }
             npc.getOrAddTrait(AgentPermanentFlyingTrait.class);
             npc.getOrAddTrait(AgentFollowCatchUpTrait.class);
-            npc.spawn(player.getLocation());
-            AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, player);
+            if (!npc.isSpawned()) {
+                AgentFollowCatchUp.respawnBesideOwner(plugin, npc, player);
+            } else if (forceBeside) {
+                AgentFollowCatchUp.bringBesideOwner(plugin, npc, player);
+            } else {
+                AgentFollowCatchUp.recoverIfNeeded(plugin, npc, player);
+                AgentFollowCatchUp.applyIfNeeded(plugin, npc, player);
+            }
+        };
+        if (delayTicks <= 0) {
+            recover.run();
+        } else {
+            Bukkit.getScheduler().runTaskLater(plugin, recover, delayTicks);
         }
+    }
+
+    @EventHandler
+    public void onPlayerChangedWorld(PlayerChangedWorldEvent event) {
+        recoverPlayerAgent(event.getPlayer(), 5L, true);
+    }
+
+    @EventHandler(ignoreCancelled = true, priority = EventPriority.MONITOR)
+    public void onPlayerTeleport(PlayerTeleportEvent event) {
+        Player player = event.getPlayer();
+        // Ignore Citizens player-NPC teleports (agents themselves).
+        if (CitizensAPI.getNPCRegistry().getNPC(player) != null) {
+            return;
+        }
+        if (event.getFrom() == null || event.getTo() == null) {
+            return;
+        }
+        // Skip tiny look/adjust teleports; react to real moves (Journey, /tp, portals, etc.).
+        if (event.getFrom().getWorld() != null
+                && event.getFrom().getWorld().equals(event.getTo().getWorld())
+                && event.getFrom().distanceSquared(event.getTo()) < 4.0) {
+            return;
+        }
+        recoverPlayerAgent(player, 2L, true);
     }
 }

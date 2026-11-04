@@ -88,6 +88,7 @@ public class OverworldAgent extends JavaPlugin {
         this.queryer = new Queryer(this, q -> {
             // If we couldn't connect to the database disable the plugin
             if (q == null) {
+                this.queryer = null;
                 this.getLogger().severe("Could not establish MySQL connection! Disabling plugin...");
                 getCommand("agent").setExecutor(this);
                 return;

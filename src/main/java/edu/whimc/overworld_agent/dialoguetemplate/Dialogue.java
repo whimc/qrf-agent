@@ -3,17 +3,24 @@ package edu.whimc.overworld_agent.dialoguetemplate;
 
 
 
+import com.sk89q.worldedit.bukkit.BukkitAdapter;
+import com.sk89q.worldguard.WorldGuard;
+import com.sk89q.worldguard.protection.managers.RegionManager;
+import com.sk89q.worldguard.protection.regions.ProtectedRegion;
+import com.sk89q.worldguard.protection.regions.RegionContainer;
 import edu.whimc.overworld_agent.OverworldAgent;
 import edu.whimc.overworld_agent.traits.AgentFollowTuning;
 import edu.whimc.overworld_agent.traits.AgentPermanentFlyingTrait;
 import edu.whimc.overworld_agent.dialoguetemplate.models.Chatbot;
 import edu.whimc.overworld_agent.dialoguetemplate.models.DialoguePrompt;
 import edu.whimc.overworld_agent.llm.context.AgentChatEvent;
+import edu.whimc.overworld_agent.llm.context.LearnerActivityContextProvider;
 import edu.whimc.overworld_agent.llm.research.AgentChatResearchLogger;
 import edu.whimc.overworld_agent.llm.research.AgentChatResearchTurn;
 
 import edu.whimc.overworld_agent.utils.AgentEntityTypes;
 import edu.whimc.overworld_agent.utils.AgentPermissions;
+import edu.whimc.overworld_agent.utils.CitizensSkinUrls;
 import edu.whimc.overworld_agent.utils.Utils;
 import edu.whimc.sciencetools.models.sciencetool.ScienceTool;
 import edu.whimc.sciencetools.models.sciencetool.ScienceToolMeasureEvent;
@@ -45,7 +52,6 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 
@@ -53,6 +59,7 @@ import java.util.logging.Level;
 public class Dialogue implements Listener {
     private SpigotCallback spigotCallback;
     /* Unicode for bullet character */
+    private static final int GUIDANCE_NEAREST_LIMIT = 3;
     private static final String BULLET = "\u2022";
     private OverworldAgent plugin;
     private Player player;
@@ -73,6 +80,8 @@ public class Dialogue implements Listener {
     private String discussionSessionId;
     private int discussionTurnIndex;
     private DialoguePrompt builtInUnknownPrompt;
+    /** Prevents overlapping free-discussion turns while activity + LLM are in flight. */
+    private boolean discussionBusy;
 
     public Dialogue(OverworldAgent plugin, Player player, boolean text, boolean embodied) {
         this.spigotCallback = plugin.getSpigotCallback();
@@ -283,10 +292,17 @@ public class Dialogue implements Listener {
     private static final class JourneyWaypointChoice implements JourneyLlmBridge.JourneyWaypointChoiceView {
         final String jtKey;
         final String label;
+        /** World position when known (for nearest-destination ranking). */
+        final Location location;
 
         JourneyWaypointChoice(String jtKey, String label) {
+            this(jtKey, label, null);
+        }
+
+        JourneyWaypointChoice(String jtKey, String label, Location location) {
             this.jtKey = jtKey;
             this.label = (label != null && !label.isBlank()) ? label : jtKey;
+            this.location = location;
         }
 
         @Override
@@ -304,7 +320,12 @@ public class Dialogue implements Listener {
         Map<String, JourneyWaypointChoice> byKey = new LinkedHashMap<>();
         for (JourneyWaypointChoice c : choices) {
             if (c != null && c.jtKey != null && !c.jtKey.isBlank()) {
-                byKey.putIfAbsent(c.jtKey.toLowerCase(Locale.ROOT), c);
+                String key = c.jtKey.toLowerCase(Locale.ROOT);
+                JourneyWaypointChoice existing = byKey.get(key);
+                // Prefer the entry that has a location when merging duplicates.
+                if (existing == null || (existing.location == null && c.location != null)) {
+                    byKey.put(key, c);
+                }
             }
         }
         List<JourneyWaypointChoice> out = new ArrayList<>(byKey.values());
@@ -312,22 +333,40 @@ public class Dialogue implements Listener {
         return out;
     }
 
+    private static boolean isPoiOrNpcKey(String jtKey) {
+        if (jtKey == null) {
+            return false;
+        }
+        String key = jtKey.toLowerCase(Locale.ROOT);
+        return key.startsWith("poi-") || key.startsWith("npc-");
+    }
+
     /**
-     * Picks a random subset of server (public) waypoints for the guidance menu: 3–5 when enough exist,
-     * otherwise all available (1–2).
+     * Picks up to {@code limit} nearest POI/NPC destinations on the player's current world.
      */
-    private static List<JourneyWaypointChoice> randomGuidanceWaypointSample(List<JourneyWaypointChoice> source) {
-        if (source == null || source.isEmpty()) {
+    private static List<JourneyWaypointChoice> nearestGuidanceWaypointSample(
+            Player player, List<JourneyWaypointChoice> source, int limit) {
+        if (player == null || source == null || source.isEmpty() || limit <= 0) {
             return Collections.emptyList();
         }
-        List<JourneyWaypointChoice> copy = new ArrayList<>(source);
-        Collections.shuffle(copy, ThreadLocalRandom.current());
-        int maxTake = Math.min(5, copy.size());
-        int minTake = Math.min(3, copy.size());
-        int count = (minTake == maxTake)
-                ? minTake
-                : (minTake + ThreadLocalRandom.current().nextInt(maxTake - minTake + 1));
-        return new ArrayList<>(copy.subList(0, count));
+        Location origin = player.getLocation();
+        World world = origin.getWorld();
+        if (world == null) {
+            return Collections.emptyList();
+        }
+        List<JourneyWaypointChoice> ranked = new ArrayList<>();
+        for (JourneyWaypointChoice c : source) {
+            if (c == null || !isPoiOrNpcKey(c.jtKey)) {
+                continue;
+            }
+            if (c.location == null || c.location.getWorld() == null || !c.location.getWorld().equals(world)) {
+                continue;
+            }
+            ranked.add(c);
+        }
+        ranked.sort(Comparator.comparingDouble(c -> c.location.distanceSquared(origin)));
+        int take = Math.min(limit, ranked.size());
+        return new ArrayList<>(ranked.subList(0, take));
     }
 
     private static List<Object> flattenWaypointContainer(Object all) {
@@ -516,7 +555,35 @@ public class Dialogue implements Listener {
         if (label == null || label.isBlank()) {
             label = key;
         }
-        return new JourneyWaypointChoice(key, label);
+        Location location = locationFromWaypointCell(waypoint);
+        return new JourneyWaypointChoice(key, label, location);
+    }
+
+    private static Location locationFromWaypointCell(Object waypoint) {
+        Object cell = extractWaypointCell(waypoint);
+        Integer[] coords = cellCoords(cell);
+        if (coords == null) {
+            return null;
+        }
+        World world = null;
+        Integer domain = cellDomainIndex(cell);
+        if (domain != null) {
+            world = worldForJourneyDomain(domain);
+        }
+        if (world == null) {
+            return null;
+        }
+        return new Location(world, coords[0] + 0.5, coords[1], coords[2] + 0.5);
+    }
+
+    private static World worldForJourneyDomain(int domain) {
+        for (World world : Bukkit.getWorlds()) {
+            Integer id = journeyDomainForWorldSafe(world);
+            if (id != null && id == domain) {
+                return world;
+            }
+        }
+        return null;
     }
 
     /**
@@ -827,6 +894,10 @@ public class Dialogue implements Listener {
                 Utils.msgNoPrefix(player, ChatColor.RED + "Enter a message in chat, or type stop to end the chat.");
                 return;
             }
+            if (discussionBusy) {
+                Utils.msgNoPrefix(player, ChatColor.GRAY + "Please wait for the previous reply before sending another message.");
+                return;
+            }
             response = StringUtils.trimToEmpty(text);
             // Echo privately because the public chat event is cancelled while in chat mode.
             Utils.msgNoPrefix(player, "&7You: &f" + response);
@@ -907,6 +978,139 @@ public class Dialogue implements Listener {
             return Collections.emptyList();
         } catch (Throwable t) {
             return Collections.emptyList();
+        }
+    }
+
+    /**
+     * Destinations for the "something cool" menu: public Journey waypoints + POI regions on the
+     * player's <em>current</em> world only (locations attached when available).
+     */
+    private void loadSameWorldGuidanceDestinations(Player player, Consumer<List<JourneyWaypointChoice>> callback) {
+        if (callback == null || player == null) {
+            return;
+        }
+        FileConfiguration cfg = plugin.getConfig();
+        World world = player.getWorld();
+        Integer domain = journeyDomainForWorldSafe(world);
+        Set<Integer> domains = domain == null ? Set.of() : Set.of(domain);
+
+        List<JourneyWaypointChoice> choices = new ArrayList<>();
+        if (!domains.isEmpty()) {
+            choices.addAll(collectJourneyPublicWaypoints(domains));
+        }
+
+        String poiSource = cfg.getString("journey.poi-source", "both");
+        boolean useWorldGuard = "worldguard".equalsIgnoreCase(poiSource) || "both".equalsIgnoreCase(poiSource);
+        boolean useDatabase = "database".equalsIgnoreCase(poiSource) || "both".equalsIgnoreCase(poiSource);
+        int poiFromWorldGuard = 0;
+        if (cfg.getBoolean("journey.include-poi-regions", true) && useWorldGuard) {
+            for (JourneyWaypointChoice poi : poiChoicesFromWorldGuard(world, cfg)) {
+                choices.add(poi);
+                poiFromWorldGuard++;
+            }
+        }
+        List<JourneyWaypointChoice> mergedChoices = sortUniqueChoices(choices);
+        final int journeyCount = (int) mergedChoices.stream().filter(c -> isPoiOrNpcKey(c.jtKey)).count();
+        final int poiFromWorldGuardFinal = poiFromWorldGuard;
+
+        Runnable finish = () -> {
+            if (cfg.getBoolean("journey.debug-log", false)) {
+                plugin.getLogger().info(
+                        "[OverworldAgent][Journey] same-world guidance ("
+                                + player.getName()
+                                + " world="
+                                + world.getName()
+                                + " domain="
+                                + domain
+                                + " poiOrNpcChoices="
+                                + journeyCount
+                                + " poiFromWorldGuard="
+                                + poiFromWorldGuardFinal
+                                + " totalChoices="
+                                + mergedChoices.size()
+                                + ")");
+            }
+            callback.accept(mergedChoices);
+        };
+
+        if (cfg.getBoolean("journey.include-poi-regions", true) && useDatabase && plugin.getQueryer() != null) {
+            String tablePrefix = cfg.getString("journey.worldguard-table-prefix", "rg_");
+            String poiPrefix = cfg.getString("journey.poi-region-prefix", "poi-");
+            // DB listing is by world-name prefix; filter to this exact world afterward.
+            plugin.getQueryer().listPoiRegions(world.getName(), poiPrefix, tablePrefix, dbPoi -> {
+                List<JourneyWaypointChoice> withDb = new ArrayList<>(mergedChoices);
+                if (dbPoi != null) {
+                    for (JourneyGuidanceCatalog.Destination poi : dbPoi) {
+                        if (poi == null || poi.jtKey() == null) {
+                            continue;
+                        }
+                        withDb.add(new JourneyWaypointChoice(poi.jtKey(), poi.label(), null));
+                    }
+                }
+                List<JourneyWaypointChoice> finalChoices = sortUniqueChoices(withDb);
+                if (cfg.getBoolean("journey.debug-log", false)) {
+                    plugin.getLogger().info(
+                            "[OverworldAgent][Journey] same-world guidance+db ("
+                                    + player.getName()
+                                    + " world="
+                                    + world.getName()
+                                    + " finalChoiceCount="
+                                    + finalChoices.size()
+                                    + ")");
+                }
+                callback.accept(finalChoices);
+            });
+            return;
+        }
+        finish.run();
+    }
+
+    private static List<JourneyWaypointChoice> poiChoicesFromWorldGuard(World world, FileConfiguration cfg) {
+        if (world == null || Bukkit.getPluginManager().getPlugin("WorldGuard") == null) {
+            return List.of();
+        }
+        String poiPrefix = cfg.getString("journey.poi-region-prefix", "poi-");
+        if (poiPrefix == null) {
+            poiPrefix = "poi-";
+        }
+        String prefixLower = poiPrefix.toLowerCase(Locale.ROOT);
+        List<JourneyWaypointChoice> out = new ArrayList<>();
+        try {
+            RegionContainer container = WorldGuard.getInstance().getPlatform().getRegionContainer();
+            RegionManager manager = container.get(BukkitAdapter.adapt(world));
+            if (manager == null) {
+                return List.of();
+            }
+            for (Map.Entry<String, ProtectedRegion> entry : manager.getRegions().entrySet()) {
+                String regionId = entry.getKey();
+                if (regionId == null || !regionId.toLowerCase(Locale.ROOT).startsWith(prefixLower)) {
+                    continue;
+                }
+                ProtectedRegion region = entry.getValue();
+                Location center = regionCenter(world, region);
+                String key = regionId.toLowerCase(Locale.ROOT);
+                out.add(new JourneyWaypointChoice(
+                        key, JourneyGuidanceCatalog.formatPoiLabel(regionId, poiPrefix), center));
+            }
+        } catch (Throwable ignored) {
+            return List.of();
+        }
+        return out;
+    }
+
+    private static Location regionCenter(World world, ProtectedRegion region) {
+        if (world == null || region == null) {
+            return null;
+        }
+        try {
+            var min = region.getMinimumPoint();
+            var max = region.getMaximumPoint();
+            double x = (min.getX() + max.getX()) / 2.0;
+            double y = (min.getY() + max.getY()) / 2.0;
+            double z = (min.getZ() + max.getZ()) / 2.0;
+            return new Location(world, x, y, z);
+        } catch (Throwable ignored) {
+            return null;
         }
     }
 
@@ -1006,18 +1210,15 @@ public class Dialogue implements Listener {
     }
 
     private void showGuidanceDestinationMenu(Player player, String guidanceResponse, List<JourneyWaypointChoice> guidanceChoices) {
-        FileConfiguration cfg = plugin.getConfig();
-        List<World> linkedWorlds = JourneyGuidanceCatalog.linkedWorlds(player.getWorld(), cfg);
-        String linkedPrefix = JourneyGuidanceCatalog.linkedPrefixFor(player.getWorld(), cfg);
-        final boolean linkedCluster = linkedWorlds.size() > 1;
-        final List<JourneyWaypointChoice> guidanceDisplay = randomGuidanceWaypointSample(guidanceChoices);
-        String hoverPick = linkedCluster
-                ? "&aRandom places in linked worlds (" + linkedPrefix + "*) — click to journey"
-                : "&aA few random places in this world — click to journey";
+        final List<JourneyWaypointChoice> guidanceDisplay =
+                nearestGuidanceWaypointSample(player, guidanceChoices, GUIDANCE_NEAREST_LIMIT);
+        if (guidanceDisplay.isEmpty()) {
+            return;
+        }
         sendComponent(
                 player,
                 "&8" + BULLET + guidanceResponse,
-                hoverPick,
+                "&aNearest POIs/NPCs in this world — click to journey",
                 p -> {
                     this.spigotCallback.clearCallbacks(player);
                     Utils.msgNoPrefix(player, "&lPick a destination:", "");
@@ -1056,10 +1257,14 @@ public class Dialogue implements Listener {
                 "&f&nYour response");
         String guidanceResponse = cfg.getString("template-gui.text.guidance-response",
                 "&f&nCan you show me something cool?");
+        String lookAtThisResponse = cfg.getString("template-gui.text.look-at-this-response",
+                "&f&nLook at this!");
         String scoreResponse = cfg.getString("template-gui.text.score-response",
-                "&f&nI want to see my scores");
+                "&f&nI want to see my science scores!");
         String agentEdit = cfg.getString("template-gui.text.agent-edit",
                 "&f&nI want to edit my agent");
+        boolean showGuidance = cfg.getBoolean("template-gui.show-guidance", true);
+        boolean showLookAtThis = cfg.getBoolean("template-gui.show-look-at-this", true);
 
         // Discussion first (free text → PMML / LLM via chat)
         if (text) {
@@ -1080,12 +1285,23 @@ public class Dialogue implements Listener {
                     });
         }
 
+        if (showLookAtThis) {
+            sendComponent(
+                    player,
+                    "&8" + BULLET + lookAtThisResponse,
+                    "&aClick here — I'll look around and share a science comment",
+                    p -> startLookAtThis()
+            );
+        }
+
         // Agent Guidance Option (async — remaining menu items are sent after this completes)
         Runnable sendMenuTail = () -> sendDialogueMenuTail(cfg, scoreResponse, agentEdit);
 
-        if (Bukkit.getPluginManager().getPlugin("Journey") != null) {
-            loadGuidanceDestinations(player, guidanceChoices -> {
-                if (!guidanceChoices.isEmpty()) {
+        if (showGuidance && Bukkit.getPluginManager().getPlugin("Journey") != null) {
+            loadSameWorldGuidanceDestinations(player, guidanceChoices -> {
+                List<JourneyWaypointChoice> nearest =
+                        nearestGuidanceWaypointSample(player, guidanceChoices, GUIDANCE_NEAREST_LIMIT);
+                if (!nearest.isEmpty()) {
                     showGuidanceDestinationMenu(player, guidanceResponse, guidanceChoices);
                 } else {
                     sendComponent(
@@ -1102,12 +1318,46 @@ public class Dialogue implements Listener {
         }
     }
 
+    /**
+     * Gathers nearby Journey/POI/NPC + WorldGuard/biome context and asks the LLM (with RAG) for a
+     * short scientific comment.
+     */
+    private void startLookAtThis() {
+        if (discussionBusy) {
+            Utils.msgNoPrefix(player, ChatColor.GRAY + "Please wait for the previous reply before trying again.");
+            return;
+        }
+        this.spigotCallback.clearCallbacks(player);
+        Consumer<List<JourneyWaypointChoice>> continueWith = choices -> {
+            List<LookAtThisSceneBuilder.NearbyDestination> nearby = new ArrayList<>();
+            if (choices != null) {
+                for (JourneyWaypointChoice c : choices) {
+                    if (c == null || c.location == null) {
+                        continue;
+                    }
+                    nearby.add(new LookAtThisSceneBuilder.NearbyDestination(c.jtKey, c.label, c.location));
+                }
+            }
+            String scene = LookAtThisSceneBuilder.build(plugin, player, nearby);
+            this.response = "Look at this! Please make a short scientific comment about what is around me "
+                    + "right now. Use the scene context below and any relevant reference material. "
+                    + "Keep it conversational and appropriate for learners.\n\n"
+                    + scene;
+            doResponse();
+        };
+        if (Bukkit.getPluginManager().getPlugin("Journey") != null) {
+            loadSameWorldGuidanceDestinations(player, continueWith);
+        } else {
+            continueWith.accept(List.of());
+        }
+    }
+
     private void sendDialogueMenuTail(FileConfiguration cfg, String scoreResponse, String agentEdit) {
         //Agent Score option
         sendComponent(
                 player,
                 "&8" + BULLET + scoreResponse,
-                "&aClick here to see your scores!",
+                "&aClick here to see your science scores!",
                 p -> {
 
                     this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Progress"), id -> {
@@ -1202,44 +1452,7 @@ public class Dialogue implements Listener {
                         player,
                         "&8" + BULLET + " &rSkin",
                         "&aClick here to select \"&rskin change",
-                        l -> {
-                            this.spigotCallback.clearCallbacks(player);
-                            Utils.msgNoPrefix(player, "&lClick what skin you want me to have:", "");
-                            FileConfiguration config = plugin.getConfig();
-                            String path = "skins."+plugin.getSkinType();
-                            for (String key : config.getConfigurationSection(path).getKeys(false)) {
-                                ConfigurationSection section = config.getConfigurationSection(path + "." + key);
-                                String labelOpt = section.getString("dialogue_option");
-                                final String label = (labelOpt == null || labelOpt.isBlank()) ? key : labelOpt;
-                                String signature = section.getString("signature");
-                                String data = section.getString("data");
-                                final String skinName = key;
-                                sendComponent(
-                                        player,
-                                        "&8" + BULLET + " &r" + label,
-                                        "&aClick here to select \"&r" + label + "&a\"",
-                                        m -> {
-                                            this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Edit"), id -> {
-                                                Map<String, NPC> npcs = plugin.getAgents();
-                                                NPC npc = npcs.get(player.getName());
-                                                if (npc != null) {
-                                                    SkinTrait skinTrait = npc.getOrAddTrait(SkinTrait.class);
-                                                    skinTrait.setSkinPersistent(skinName, signature, data);
-                                                    plugin.getAgentEdits().get(player).replace("Skin",skinChange+1);
-                                                    int numLeft = AGENT_EDIT_NUM - plugin.getAgentEdits().get(player).get("Skin");
-                                                    player.sendMessage("Your agent's skin has been changed to " + label + ".\n You have " + numLeft + " skin edits left.");
-                                                    plugin.getQueryer().storeNewAgent(player, "edit", npc.getName(), skinName, id2 -> {
-                                                        plugin.getAgents().put(player.getName(), npc);
-                                                    });
-                                                } else {
-                                                    player.sendMessage("You need to have an AI friend first. Please try again");
-                                                }
-                                                this.spigotCallback.clearCallbacks(player);
-                                            });
-                                        });
-                            }
-                            sendBackOption(this::openEditMenu);
-                        });
+                        l -> openSkinSelectionMenu(skinChange));
             }
             if (AgentPermissions.canEditName(player) && nameChange < AGENT_EDIT_NUM) {
             sendComponent(
@@ -1366,6 +1579,119 @@ public class Dialogue implements Listener {
         sendBackOption(this::doDialogue);
     }
 
+    private void openSkinSelectionMenu(int skinChange) {
+        this.spigotCallback.clearCallbacks(player);
+        Utils.msgNoPrefix(player, "&lClick what skin you want me to have:", "");
+        FileConfiguration config = plugin.getConfig();
+        String path = "skins." + plugin.getSkinType();
+        ConfigurationSection skinSection = config.getConfigurationSection(path);
+        if (skinSection != null) {
+            for (String key : skinSection.getKeys(false)) {
+                ConfigurationSection section = config.getConfigurationSection(path + "." + key);
+                if (section == null) {
+                    continue;
+                }
+                String labelOpt = section.getString("dialogue_option");
+                final String label = (labelOpt == null || labelOpt.isBlank()) ? key : labelOpt;
+                String signature = section.getString("signature");
+                String data = section.getString("data");
+                final String skinName = key;
+                sendComponent(
+                        player,
+                        "&8" + BULLET + " &r" + label,
+                        "&aClick here to select \"&r" + label + "&a\"",
+                        m -> this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Edit"), id ->
+                                applyConfiguredSkinEdit(skinChange, skinName, signature, data, label)));
+            }
+        }
+        if (plugin.getConfig().getBoolean("agent-spawn.allow-url-skins", true)) {
+            sendComponent(
+                    player,
+                    "&8" + BULLET + " &rCustom URL skin",
+                    "&aPaste a direct https:// link to a .png skin image",
+                    m -> openCustomSkinUrlInput(skinChange));
+        }
+        sendBackOption(this::openEditMenu);
+    }
+
+    private void applyConfiguredSkinEdit(
+            int skinChange,
+            String skinName,
+            String signature,
+            String data,
+            String label
+    ) {
+        NPC npc = plugin.getAgents().get(player.getName());
+        if (npc == null) {
+            player.sendMessage("You need to have an AI friend first. Please try again");
+            this.spigotCallback.clearCallbacks(player);
+            return;
+        }
+        SkinTrait skinTrait = npc.getOrAddTrait(SkinTrait.class);
+        skinTrait.setSkinPersistent(skinName, signature, data);
+        finishSkinEdit(skinChange, label, skinName, npc);
+    }
+
+    private void openCustomSkinUrlInput(int skinChange) {
+        this.spigotCallback.clearCallbacks(player);
+        List<String> instruct = Arrays.asList(
+                Utils.color("&0&lCustom skin URL"),
+                "",
+                Utils.color("&7Paste a direct &fhttps:// &7link to a .png skin image in chat."));
+        plugin.getChatTextInputFactory().open(player, instruct, text -> {
+            if (StringUtils.isBlank(text)) {
+                Utils.msgNoPrefix(player, ChatColor.RED + "Please enter a URL in chat.");
+                openCustomSkinUrlInput(skinChange);
+                return;
+            }
+            String url = text.trim();
+            if (!CitizensSkinUrls.isHttpsUrl(url)) {
+                Utils.msgNoPrefix(player, ChatColor.RED + "Use a direct https:// link to a .png file.");
+                openCustomSkinUrlInput(skinChange);
+                return;
+            }
+            if (!plugin.getConfig().getBoolean("agent-spawn.allow-url-skins", true)) {
+                player.sendMessage("Custom URL skins are disabled on this server.");
+                openSkinSelectionMenu(skinChange);
+                return;
+            }
+            player.sendMessage("Fetching skin from URL...");
+            CitizensSkinUrls.fetchFromUrl(
+                    plugin,
+                    url,
+                    false,
+                    skinData -> plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Edit"), id -> {
+                        NPC npc = plugin.getAgents().get(player.getName());
+                        if (npc == null) {
+                            player.sendMessage("You need to have an AI friend first. Please try again");
+                            this.spigotCallback.clearCallbacks(player);
+                            return;
+                        }
+                        SkinTrait skinTrait = npc.getOrAddTrait(SkinTrait.class);
+                        skinTrait.setSkinPersistent(
+                                skinData.cacheId(), skinData.signature(), skinData.texture());
+                        finishSkinEdit(skinChange, "custom URL skin", skinData.cacheId(), npc);
+                    }),
+                    error -> {
+                        player.sendMessage(
+                                "Could not load skin from that URL. Use a direct https:// link to a .png file. "
+                                        + "(" + error + ")");
+                        openCustomSkinUrlInput(skinChange);
+                    }
+            );
+        });
+    }
+
+    private void finishSkinEdit(int skinChange, String label, String appearanceForDb, NPC npc) {
+        plugin.getAgentEdits().get(player).replace("Skin", skinChange + 1);
+        int numLeft = AGENT_EDIT_NUM - plugin.getAgentEdits().get(player).get("Skin");
+        player.sendMessage(
+                "Your agent's skin has been changed to " + label + ".\n You have " + numLeft + " skin edits left.");
+        plugin.getQueryer().storeNewAgent(player, "edit", npc.getName(), appearanceForDb, id2 ->
+                plugin.getAgents().put(player.getName(), npc));
+        this.spigotCallback.clearCallbacks(player);
+    }
+
     /**
      * Resolves a PMML label to a configured prompt, then {@link #UNKNOWN_LABEL}, then a built-in fallback.
      * Live servers with truncated {@code prompts} lists (missing label -2) used to NPE here during discussion.
@@ -1470,6 +1796,7 @@ public class Dialogue implements Listener {
         final boolean[] dialogueResearchLogged = {false};
 
         Runnable storeAndSend = () -> Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            discussionBusy = false;
             if (!dialogueResearchLogged[0]) {
                 logDialogueDiscussionPmmlTurn(
                         finalResponse,
@@ -1479,103 +1806,148 @@ public class Dialogue implements Listener {
                         finalCertainty
                 );
             }
-            this.plugin.getQueryer().storeNewScienceInquiry(player, finalResponse, feedbackOut[0], id -> {
-                this.plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Dialogue"), id2 -> {
-                    if (finalPrompt1 != null && !finalPrompt1.getPrompt().equalsIgnoreCase("science_tool")) {
-                        player.sendMessage(feedbackOut[0]);
+            // Always deliver the reply even if MySQL logging fails.
+            if (finalPrompt1 != null && !finalPrompt1.getPrompt().equalsIgnoreCase("science_tool")) {
+                if (player.isOnline()) {
+                    player.sendMessage(feedbackOut[0]);
+                }
+            }
+            if (plugin.getQueryer() == null) {
+                return;
+            }
+            try {
+                plugin.getQueryer().storeNewScienceInquiry(player, finalResponse, feedbackOut[0], id -> {
+                    if (plugin.getQueryer() != null) {
+                        plugin.getQueryer().storeNewInteraction(new Interaction(plugin, player, "Dialogue"), id2 -> {});
                     }
                 });
-            });
+            } catch (Exception ex) {
+                plugin.getLogger().warning("Failed to log dialogue turn: " + ex.getMessage());
+            }
         }, 20L);
 
         if (plugin.getConfig().getBoolean("llm.use-for-reply", false)
                 && plugin.getLlmProvider() != null
                 && plugin.getLlmProvider().isConfigured()) {
             plugin.getLogger().fine("[OverworldAgent][Journey] LLM path started");
+            discussionBusy = true;
+            Utils.msgNoPrefix(player, ChatColor.GRAY + "Thinking...");
             boolean journeyActions = plugin.getConfig().getBoolean("llm.journey-actions.enabled", true)
                     && Bukkit.getPluginManager().getPlugin("Journey") != null;
 
             java.util.function.Consumer<List<JourneyWaypointChoice>> startLlm = guidanceChoices -> {
                 List<JourneyGuidanceCatalog.Destination> destinations =
                         JourneyLlmBridge.fromWaypointChoices(guidanceChoices);
-                String systemPrompt = plugin.buildLlmSystemPrompt(player);
-                if (journeyActions && !destinations.isEmpty()) {
-                    int max = plugin.getConfig().getInt("llm.journey-actions.max-destinations", 60);
-                    systemPrompt = JourneyLlmBridge.appendDestinationContext(systemPrompt, destinations, max);
-                }
-                final String llmSystemPrompt = systemPrompt;
-                final String llmUserMessage = buildLlmMessageWithHistory(finalResponse);
-                final long requestStartedAt = System.currentTimeMillis();
-                final String turnId = newDiscussionTurnId();
-                final int turnIndex = nextDiscussionTurnIndex();
-                final String traceId = UUID.randomUUID().toString().substring(0, 8);
-                final String providerName = plugin.getConfig().getString("llm.provider", "unknown");
-                final String modelName = plugin.getConfig().getString("llm.model", "unknown");
-                final boolean ragEnabled = plugin.getConfig().getBoolean("llm.rag.enabled", false);
-                final String systemPromptHash = AgentChatResearchLogger.sha256OrNull(llmSystemPrompt);
 
-                Chatbot llmChatbot = new Chatbot(llmUserMessage);
-                CompletableFuture.supplyAsync(() -> {
+                LearnerActivityContextProvider.load(plugin, player, snapshot -> {
                     try {
-                        return llmChatbot.generateLlmReply(plugin.getLlmProvider(), llmSystemPrompt);
-                    } catch (Exception ex) {
-                        plugin.getLogger().warning("LLM reply failed: " + ex.getMessage());
-                        return null;
-                    }
-                }).thenAccept(llmText -> Bukkit.getScheduler().runTask(plugin, () -> {
-                    long responseReceivedAt = System.currentTimeMillis();
-                    int latencyMs = (int) (responseReceivedAt - requestStartedAt);
-                    String status;
-                    String errorMessage = null;
-                    String assistantForLog = feedbackOut[0];
-
-                    if (llmText != null && !llmText.isBlank()) {
-                        JourneyLlmBridge.ParsedReply parsed = JourneyLlmBridge.parseLlmReply(llmText);
-                        feedbackOut[0] = parsed.displayText().isBlank() ? llmText : parsed.displayText();
-                        assistantForLog = feedbackOut[0];
-                        String journeyTarget = parsed.journeyNameId();
-                        if (journeyTarget == null && journeyActions) {
-                            journeyTarget = JourneyLlmBridge.matchDestination(finalResponse, destinations).orElse(null);
+                        String systemPrompt = plugin.buildLlmSystemPrompt(player);
+                        if (journeyActions && !destinations.isEmpty()) {
+                            int max = plugin.getConfig().getInt("llm.journey-actions.max-destinations", 60);
+                            systemPrompt = JourneyLlmBridge.appendDestinationContext(systemPrompt, destinations, max);
                         }
-                        if (journeyTarget != null && journeyActions) {
-                            plugin.getLogger().info(
-                                    "[OverworldAgent][Journey] LLM-triggered navigation for "
-                                            + player.getName()
-                                            + ": "
-                                            + journeyTarget);
-                            dispatchJourneyCommand(player, journeyTarget);
+                        String activityPrompt = LearnerActivityContextProvider.isEnabled(plugin)
+                                ? LearnerActivityContextProvider.formatForPrompt(snapshot, player)
+                                : "";
+                        if (!activityPrompt.isBlank()) {
+                            systemPrompt = systemPrompt + activityPrompt;
+                            if (plugin.getConfig().getBoolean("llm.debug-log", false)) {
+                                plugin.getLogger().info(
+                                        "[OverworldAgent][LLM] activity-context chars=" + activityPrompt.length()
+                                                + " for " + player.getName());
+                            }
                         }
-                        status = "SUCCESS";
-                    } else {
-                        status = "FALLBACK_PMML";
-                        errorMessage = "LLM returned no response; PMML/template reply shown.";
-                    }
+                        final String llmSystemPrompt = systemPrompt;
+                        final String llmUserMessage = buildLlmMessageWithHistory(finalResponse);
+                        final long requestStartedAt = System.currentTimeMillis();
+                        final String turnId = newDiscussionTurnId();
+                        final int turnIndex = nextDiscussionTurnIndex();
+                        final String traceId = UUID.randomUUID().toString().substring(0, 8);
+                        final String providerName = plugin.getConfig().getString("llm.provider", "unknown");
+                        final String modelName = plugin.getConfig().getString("llm.model", "unknown");
+                        final boolean ragEnabled = plugin.getConfig().getBoolean("llm.rag.enabled", false);
+                        final String systemPromptHash = AgentChatResearchLogger.sha256OrNull(llmSystemPrompt);
 
-                    dialogueResearchLogged[0] = true;
-                    logDialogueDiscussionLlmTurn(
-                            turnId,
-                            turnIndex,
-                            requestStartedAt,
-                            responseReceivedAt,
-                            latencyMs,
-                            finalResponse,
-                            assistantForLog,
-                            providerName,
-                            modelName,
-                            llmSystemPrompt,
-                            llmUserMessage,
-                            systemPromptHash,
-                            ragEnabled,
-                            status,
-                            errorMessage,
-                            traceId,
-                            finalPrompt1,
-                            finalPredictedClass,
-                            finalCertainty
-                    );
-                    recordDiscussionTurn(finalResponse, feedbackOut[0]);
-                    storeAndSend.run();
-                }));
+                        Chatbot llmChatbot = new Chatbot(llmUserMessage);
+                        CompletableFuture.supplyAsync(() -> {
+                            try {
+                                return llmChatbot.generateLlmReply(plugin.getLlmProvider(), llmSystemPrompt);
+                            } catch (Exception ex) {
+                                plugin.getLogger().warning("LLM reply failed: " + ex.getMessage());
+                                return null;
+                            }
+                        }).whenComplete((llmText, error) -> Bukkit.getScheduler().runTask(plugin, () -> {
+                            long responseReceivedAt = System.currentTimeMillis();
+                            int latencyMs = (int) (responseReceivedAt - requestStartedAt);
+                            String status;
+                            String errorMessage = null;
+                            String assistantForLog = feedbackOut[0];
+
+                            if (error != null) {
+                                status = "FALLBACK_PMML";
+                                errorMessage = error.getMessage();
+                                plugin.getLogger().warning("LLM reply failed: " + errorMessage);
+                            } else if (llmText != null && !llmText.isBlank()) {
+                                try {
+                                    JourneyLlmBridge.ParsedReply parsed = JourneyLlmBridge.parseLlmReply(llmText);
+                                    feedbackOut[0] = parsed.displayText().isBlank() ? llmText : parsed.displayText();
+                                    assistantForLog = feedbackOut[0];
+                                    String journeyTarget = parsed.journeyNameId();
+                                    if (journeyTarget == null && journeyActions) {
+                                        journeyTarget = JourneyLlmBridge.matchDestination(finalResponse, destinations).orElse(null);
+                                    }
+                                    if (journeyTarget != null && journeyActions) {
+                                        plugin.getLogger().info(
+                                                "[OverworldAgent][Journey] LLM-triggered navigation for "
+                                                        + player.getName()
+                                                        + ": "
+                                                        + journeyTarget);
+                                        dispatchJourneyCommand(player, journeyTarget);
+                                    }
+                                    status = "SUCCESS";
+                                } catch (Exception parseEx) {
+                                    feedbackOut[0] = llmText;
+                                    assistantForLog = llmText;
+                                    status = "SUCCESS";
+                                    plugin.getLogger().warning("LLM journey parse failed: " + parseEx.getMessage());
+                                }
+                            } else {
+                                status = "FALLBACK_PMML";
+                                errorMessage = "LLM returned no response; PMML/template reply shown.";
+                            }
+
+                            dialogueResearchLogged[0] = true;
+                            logDialogueDiscussionLlmTurn(
+                                    turnId,
+                                    turnIndex,
+                                    requestStartedAt,
+                                    responseReceivedAt,
+                                    latencyMs,
+                                    finalResponse,
+                                    assistantForLog,
+                                    providerName,
+                                    modelName,
+                                    llmSystemPrompt,
+                                    llmUserMessage,
+                                    systemPromptHash,
+                                    ragEnabled,
+                                    status,
+                                    errorMessage,
+                                    traceId,
+                                    finalPrompt1,
+                                    finalPredictedClass,
+                                    finalCertainty
+                            );
+                            recordDiscussionTurn(finalResponse, feedbackOut[0]);
+                            storeAndSend.run();
+                        }));
+                    } catch (Exception prepEx) {
+                        plugin.getLogger().warning(
+                                "LLM prompt preparation failed; using PMML reply: " + prepEx.getMessage());
+                        recordDiscussionTurn(finalResponse, feedbackOut[0]);
+                        storeAndSend.run();
+                    }
+                });
             };
 
             if (journeyActions) {
@@ -1777,6 +2149,8 @@ public class Dialogue implements Listener {
 
     private void sendComponent(Player player, String text, String hoverText, Consumer<Player> onClick) {
         player.spigot().sendMessage(createComponent(text, hoverText, onClick));
+        // Blank line between options so beginner mouse users have more space to click.
+        player.sendMessage("");
     }
 
     private TextComponent createComponent(String text, String hoverText, Consumer<Player> onClick) {

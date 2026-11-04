@@ -34,11 +34,18 @@ agent-player-nav-destination-teleport-margin: -1
 agent-player-nav-stationary-ticks: 1200
 # When horizontal distance to the owner exceeds this, the agent catch-up teleports beside them (not on top).
 agent-follow-catch-up-distance: 16.0
-# Blocks to the side of the player when catch-up teleporting.
-agent-follow-catch-up-offset: 1.5
+# Blocks to the side of the player when catch-up / teleport placing the agent.
+agent-follow-catch-up-offset: 2.0
+# Player agents: soft-follow speed (blocks/tick) while the owner is in spectator or creative flight.
+agent-player-air-follow-speed: 0.45
 # Mob agents (hovering): tighter path range and margin so they keep up while floating.
 agent-mob-follow-path-range: 5
 agent-mob-follow-margin: 1.25
+# When the owner is stopped, mob agents settle this far to the side (for clicking).
+agent-mob-idle-side-offset: 1.5
+# How far the owner must move before a locked idle settle spot is recomputed.
+agent-mob-idle-lock-move-blocks: 0.75
+agent-mob-idle-stop-distance: 0.85
 # LLM chat: provider + API key (or api-key-env). Requires outbound HTTPS for cloud providers; local uses llm.base-url.
 llm:
   use-for-reply: false
@@ -67,10 +74,23 @@ llm:
       - md
       - doc
       - docx
+      - yml
+      - yaml
   npc-context:
     enabled: true
     radius: 25.0
     max-items: 3
+  # Live learner data from WHIMC MySQL (observations, science tools, positions, progress).
+  activity-context:
+    enabled: false
+    max-own-observations: 10
+    max-peer-observations: 10
+    nearby-observation-radius: 80
+    include-peer-observations: true
+    max-science-tools: 12
+    position-lookback-ms: 900000
+    position-row-limit: 200
+    include-progress: true
   journey-actions:
     enabled: true
     max-destinations: 60
@@ -197,14 +217,22 @@ prompts:
     tool: null
     feedback: "Sorry I am not sure about this. Try talking to me about something else or maybe ask an instructor to help you."
 template-gui:
+  # When false, hides "Can you show me something cool?" (Journey guidance) from the dialogue menu.
+  show-guidance: true
+  # When false, hides "Look at this!" scene-analysis from the dialogue menu.
+  show-look-at-this: true
+  look-at-this:
+    max-waypoints: 5
+    block-sample-radius: 2
   text:
     see-all-responses: "&f&nI want to see our conversation"
     write-your-own-response: "&f&nI want to discuss something"
     custom-response-sign-header: ""
     end-your-own-response-speech: "&f&nClick here to stop query"
     guidance-response: "&f&nCan you show me something cool?"
+    look-at-this-response: "&f&nLook at this!"
     show-response: "&f&nI want to show you/ask about something unique to this environment!"
-    score-response: "&f&nI want to see my scores"
+    score-response: "&f&nI want to see my science scores!"
     build-response: "&f&nI want to build something!"
     agent-edit: "&f&nI want to edit my agent"
   filler-item: white_stained_glass_pane

@@ -3,7 +3,6 @@ package edu.whimc.overworld_agent.traits;
 import edu.whimc.overworld_agent.OverworldAgent;
 
 import edu.whimc.overworld_agent.dialoguetemplate.Dialogue;
-import net.citizensnpcs.Settings;
 import net.citizensnpcs.api.persistence.Persist;
 import net.citizensnpcs.api.trait.Trait;
 import net.citizensnpcs.api.util.DataKey;
@@ -80,23 +79,6 @@ public class SpawnExpertTrait extends Trait {
             if(event.getNPC()==this.getNPC()){
                 Dialogue dialogue = new Dialogue(plugin, sender, text, true);
                 dialogue.doDialogue();
-            }
-        }
-    }
-
-    // Called every tick
-    @Override
-    public void run() {
-        if(npc.isSpawned() && player != null && Bukkit.getPlayer(player) != null){
-            if (!npc.getEntity().getWorld().equals(Bukkit.getPlayer(player).getWorld())) {
-                if (Settings.Setting.FOLLOW_ACROSS_WORLDS.asBoolean()) {
-                    Player follower = Bukkit.getPlayer(player);
-                    npc.despawn();
-                    npc.spawn(AgentFollowCatchUp.besidePlayer(follower, AgentFollowCatchUp.besideOffset(plugin)));
-                    AgentFollowTuning.applyForCurrentEntity(plugin, npc);
-                    AgentFollowTuning.scheduleFollowAndApplyTraits(plugin, npc, follower);
-                }
-                return;
             }
         }
     }

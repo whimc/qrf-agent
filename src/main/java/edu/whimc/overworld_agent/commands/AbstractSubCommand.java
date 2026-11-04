@@ -90,11 +90,13 @@ public abstract class AbstractSubCommand {
     }
 
     public List<String> executeOnTabComplete(CommandSender sender, String[] args) {
-        if ((!AgentPermissions.bypassesRestrictions(sender) && !sender.hasPermission(getPermission()))
-                || args.length > this.maxArgs) {
-            return Arrays.asList();
+        if ((!requiresSubcommandPermission()
+                || AgentPermissions.bypassesRestrictions(sender)
+                || sender.hasPermission(getPermission()))
+                && args.length <= this.maxArgs) {
+            return onTabComplete(sender, args);
         }
-        return onTabComplete(sender, args);
+        return Arrays.asList();
     }
 
     private String formatArg(String arg) {
@@ -134,8 +136,19 @@ public abstract class AbstractSubCommand {
 
     protected abstract boolean onCommand(CommandSender sender, String[] args);
 
+    /**
+     * When false, {@link #executeSubCommand} skips the subcommand node
+     * ({@code whimc-agent.agent.<subcommand>}) and relies on granular checks in the override
+     * (e.g. destroy.self / despawn.self).
+     */
+    protected boolean requiresSubcommandPermission() {
+        return true;
+    }
+
     public boolean executeSubCommand(CommandSender sender, String[] args) {
-        if (!AgentPermissions.bypassesRestrictions(sender) && !sender.hasPermission(getPermission())) {
+        if (requiresSubcommandPermission()
+                && !AgentPermissions.bypassesRestrictions(sender)
+                && !sender.hasPermission(getPermission())) {
             Utils.msg(sender,
                     "&cYou do not have the required permission!",
                     "  &f&o" + getPermission().getName());

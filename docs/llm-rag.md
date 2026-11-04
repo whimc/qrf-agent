@@ -63,7 +63,7 @@ If the chosen world prompt defines `rag-directory`, files from that folder are a
 
 - **Root:** `plugins/WHIMC-QRF-Agent/<rag-directory>` (relative to the plugin data folder), or an absolute path if set in YAML.
 - **Recursion:** Subfolders up to `llm.rag.max-directory-depth` (default **6**).
-- **Extensions:** Only types listed in `llm.rag.include-extensions` (default `txt`, `md`, `doc`, `docx`).
+- **Extensions:** Only types listed in `llm.rag.include-extensions` (default `txt`, `md`, `doc`, `docx`, `yml`, `yaml`).
 - **Order:** Files are processed in **sorted path order** (stable and predictable).
 
 ### 2. Text extraction
@@ -73,6 +73,7 @@ If the chosen world prompt defines `rag-directory`, files from that folder are a
 | `.txt`, `.md` | UTF-8 plain text |
 | `.docx` | Apache POI `XWPFWordExtractor` |
 | `.doc` | Apache POI `WordExtractor` |
+| `.yml`, `.yaml` | Bukkit YAML parse. **Citizens NPC saves** (`npc:` map) are summarized to name, world/coords, hologram labels, and dialogue only (skins/UUIDs/equipment stripped). Other YAML is flattened with noisy keys skipped. |
 
 Unsupported extensions are skipped.
 
@@ -128,6 +129,8 @@ llm:
       - md
       - doc
       - docx
+      - yml
+      - yaml
   debug-log: false   # log RAG char counts and file lists to console
 ```
 
@@ -166,5 +169,31 @@ These also extend the system prompt but are separate from `llm-context`:
 |---------|--------|---------|
 | Journey actions | `llm.journey-actions` | Appends destination catalog for navigation from chat |
 | NPC context | `llm.npc-context` | Nearby Citizens NPC summaries (`/agent chat test` only) |
+| Learner activity | `llm.activity-context` | Live MySQL: observations, science tools, position summary, progress |
+
+### Learner activity context
+
+When `llm.activity-context.enabled` is true, each LLM turn (dialogue discuss + `/agent chat test`) queries the same MySQL database as `mysql:` for:
+
+- `whimc_progress` — latest component scores
+- `whimc_player_positions` — recent trail summarized to biomes / hotspots (not every 2s row)
+- `whimc_sciencetools` — recent measurements for this player
+- `whimc_observations` — this player's recent active observations, plus nearby peers' public observations
+
+The prompt also includes the player's **live** coordinates. Results are appended under `## Learner activity context` with instructions to ground directions and notice strong peer observations.
+
+| Key | Default |
+|-----|---------|
+| `enabled` | `false` |
+| `max-own-observations` | `10` |
+| `max-peer-observations` | `10` |
+| `nearby-observation-radius` | `80` |
+| `include-peer-observations` | `true` |
+| `max-science-tools` | `12` |
+| `position-lookback-ms` | `900000` |
+| `position-row-limit` | `200` |
+| `include-progress` | `true` |
+
+Free discussion (menu) and `/agent chat test` both show **Thinking…** and block overlapping turns while a reply is in flight.
 
 See the main [README](../README.md) for LLM provider setup, world prompts, and dialogue behavior.
