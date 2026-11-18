@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>WHIMC qrf-agent relationship map</title><style>body{margin:0;padding:clamp(8px,2vw,32px);background:#fff}</style></head><body><section id="whimc-map" aria-label="WHIMC qrf-agent relationships">
+<style>#whimc-map{--wm-ink:#173343;--wm-bg:#f3f7f8;color:var(--wm-ink);font-family:Arial,Helvetica,sans-serif;margin:0 auto;max-width:1600px}#whimc-map *{box-sizing:border-box}#whimc-map .wm-scroll{overflow-x:auto;border-radius:16px;background:var(--wm-bg)}#whimc-map svg{display:block;width:100%;height:auto;min-width:900px}#whimc-map details{padding:16px 4px;line-height:1.6}#whimc-map summary{cursor:pointer;font-weight:700}#whimc-map a{color:#166674}#whimc-map .wm-hint{font-size:14px;margin:12px 4px;color:#49616f}@media(min-width:900px){#whimc-map .wm-hint{display:none}}@media print{#whimc-map svg{min-width:0}#whimc-map .wm-scroll{overflow:visible}#whimc-map details,#whimc-map .wm-hint{display:none}}</style>
+<p class="wm-hint">Scroll horizontally to explore the full map. A text description follows below.</p>
+<div class="wm-scroll" role="region" aria-label="Relationship diagram; scroll horizontally on small screens" tabindex="0"><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1600" height="1480" viewBox="0 0 1600 1480" role="img" aria-labelledby="map-title map-desc">
+<title id="map-title">WHIMC qrf-agent relationship map</title>
+<desc id="map-desc">Science Tools, Observations and Position Tracker write shared MySQL tables. Student Feedback reads activity and writes progress. qrf-agent can read those tables for learner context and writes research records. Runtime integrations include Citizens, Journey, WorldGuard, CoreProtect and ProtocolLib. Observations requires DecentHolograms and ProtocolLib. Configured LLMs, reference files and Habitat Assesser connect additional content and services. HolographicDisplays and SpeechReceiver declarations need verification. Source snapshot November 18, 2026; implemented paths may require configuration.</desc>
+<defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8" fill="none" stroke="#277c82" stroke-width="2"/></marker><marker id="declared" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8" fill="none" stroke="#8a6870" stroke-width="2"/></marker></defs>
+<style>text{font-family:Arial,Helvetica,sans-serif;fill:#173343}.title{font-size:42px;font-weight:700;letter-spacing:-1px}.subtitle{font-size:21px;fill:#49616f}.kicker{font-size:15px;letter-spacing:2px;font-weight:700;fill:#277c82}.paneltitle{font-size:25px;font-weight:700}.label{font-size:21px;font-weight:700}.body{font-size:20px}.small{font-size:18px;fill:#49616f}.tiny{font-size:16px;fill:#49616f}.mono{font-size:17px;font-family:Consolas,monospace;fill:#49616f}.agenttitle{font-size:32px;font-weight:700;fill:#fff}.agenttext{font-size:20px;fill:#d9f0f0}.pill{font-size:15px;font-weight:700;fill:#72505a}</style>
+<rect x="0" y="0" width="1600" height="1480" rx="0" fill="#f3f7f8" stroke="#f3f7f8"/>
+<text x="48" y="49" class="kicker">WHIMC / CONTRIBUTOR ORIENTATION</text>
+<text x="48" y="108" class="title">How qrf-agent connects to WHIMC</text>
+<text x="48" y="148" class="subtitle">Plugins, shared data, runtime capabilities and external services</text>
+<path d="M1050 53 H1100" fill="none" stroke="#277c82" stroke-width="3"  marker-end="url(#arrow)"/>
+<text x="1110" y="59" class="tiny">Implemented path</text>
+<path d="M1050 85 H1100" fill="none" stroke="#8a6870" stroke-width="3" stroke-dasharray="7 6" marker-end="url(#declared)"/>
+<text x="1110" y="91" class="tiny">Declared / needs verification</text>
+<text x="1050" y="133" class="kicker">SOURCE SNAPSHOT 18 NOV 2026</text>
+<rect x="48" y="196" width="450" height="390" rx="18" fill="#ffffff" stroke="#d9e3e8"/>
+<text x="72" y="230" class="kicker">01 / ACTIVITY PRODUCERS</text>
+<text x="72" y="265" class="paneltitle">WHIMC learning activity</text>
+<text x="72" y="310" class="label">Science Tools</text>
+<text x="72" y="337" class="small">Measurements and tool use</text>
+<text x="72" y="386" class="label">Observations</text>
+<text x="72" y="413" class="small">Student observations and spatial context</text>
+<text x="72" y="462" class="label">Position Tracker</text>
+<text x="72" y="489" class="small">Movement samples and region events</text>
+<text x="72" y="538" class="label">Student Feedback</text>
+<text x="72" y="565" class="small">Reads activity; writes progress scores</text>
+<path d="M498 364 H556" fill="none" stroke="#277c82" stroke-width="3"  marker-end="url(#arrow)"/>
+<text x="504" y="345" class="tiny">SQL</text>
+<rect x="566" y="196" width="450" height="390" rx="18" fill="#ffffff" stroke="#d9e3e8"/>
+<text x="590" y="230" class="kicker">02 / SHARED CONTRACTS</text>
+<text x="590" y="265" class="paneltitle">MySQL tables</text>
+<text x="590" y="310" class="mono">whimc_sciencetools</text>
+<text x="590" y="347" class="mono">whimc_observations</text>
+<text x="590" y="384" class="mono">whimc_player_positions</text>
+<text x="590" y="421" class="mono">whimc_progress</text>
+<text x="590" y="483" class="small">Producer and reader schemas must agree.</text>
+<text x="590" y="515" class="small">Region events are separate; qrf-agent</text>
+<text x="590" y="542" class="small">learner context reads position samples.</text>
+<path d="M1016 350 H1074" fill="none" stroke="#277c82" stroke-width="3"  marker-end="url(#arrow)"/>
+<text x="1020" y="330" class="tiny">read</text>
+<rect x="1084" y="196" width="468" height="390" rx="18" fill="#164d59" stroke="#164d59"/>
+<text x="1110" y="241" class="agenttext">03 / AGENT EXPERIENCE</text>
+<text x="1110" y="298" class="agenttitle">qrf-agent</text>
+<text x="1110" y="343" class="agenttext">NPC dialogue and guidance</text>
+<text x="1110" y="383" class="agenttext">Optional learner activity context</text>
+<text x="1110" y="423" class="agenttext">Local PMML or configured LLM</text>
+<text x="1110" y="493" class="agenttext">Writes agent, dialogue and</text>
+<text x="1110" y="525" class="agenttext">chat research records to MySQL</text>
+<path d="M1318 586 V620 H790 V586" fill="none" stroke="#277c82" stroke-width="3"  marker-end="url(#arrow)"/>
+<text x="836" y="613" class="tiny">research records → shared database</text>
+<rect x="48" y="658" width="478" height="380" rx="18" fill="#ffffff" stroke="#d9e3e8"/>
+<text x="72" y="692" class="kicker">04 / RUNTIME CAPABILITIES</text>
+<text x="72" y="727" class="paneltitle">Direct qrf-agent integrations</text>
+<text x="72" y="773" class="label">Citizens → qrf-agent</text>
+<text x="72" y="800" class="small">NPCs and traits; required at startup</text>
+<text x="72" y="839" class="label">Journey ↔ qrf-agent</text>
+<text x="72" y="866" class="small">Destination catalog and waypoint commands</text>
+<text x="72" y="905" class="label">WorldGuard → qrf-agent</text>
+<text x="72" y="932" class="small">Regions, points of interest and habitat teams</text>
+<text x="72" y="971" class="label">CoreProtect → qrf-agent</text>
+<text x="72" y="998" class="small">Block history for building and replay</text>
+<rect x="550" y="658" width="478" height="380" rx="18" fill="#ffffff" stroke="#d9e3e8"/>
+<text x="574" y="692" class="kicker">05 / SUPPORTING PLUGINS</text>
+<text x="574" y="727" class="paneltitle">Connections beyond the agent</text>
+<text x="574" y="773" class="label">DecentHolograms + ProtocolLib</text>
+<text x="574" y="800" class="small">Both required by Observations</text>
+<text x="574" y="839" class="label">ProtocolLib → qrf-agent</text>
+<text x="574" y="866" class="small">Packet-based sign input menu</text>
+<text x="574" y="905" class="label">WorldGuard → Tools / Tracker</text>
+<text x="574" y="932" class="small">Region-aware tools; optional region tracking</text>
+<text x="574" y="971" class="label">Quests / Multiverse / WorldEdit</text>
+<text x="574" y="998" class="small">Additional branches, declarations and adapters</text>
+<rect x="1052" y="658" width="500" height="380" rx="18" fill="#ffffff" stroke="#d9e3e8"/>
+<text x="1076" y="692" class="kicker">06 / CONTENT AND SERVICES</text>
+<text x="1076" y="727" class="paneltitle">External and file-based inputs</text>
+<text x="1076" y="773" class="label">Reference files → qrf-agent</text>
+<text x="1076" y="800" class="small">World prompts and bounded text excerpts</text>
+<text x="1076" y="839" class="label">qrf-agent ↔ hosted / local LLM</text>
+<text x="1076" y="866" class="small">Configured prompts, selected context and replies</text>
+<text x="1076" y="905" class="label">qrf-agent → Habitat Assesser</text>
+<text x="1076" y="932" class="small">BuildAssessEvent → Socket.IO assessment service</text>
+<text x="1076" y="971" class="label">Citizens / Mineskin</text>
+<text x="1076" y="998" class="small">Optional HTTPS image URLs for player skins</text>
+<rect x="48" y="1070" width="1504" height="150" rx="18" fill="#f8f1f2" stroke="#e4d4d8"/>
+<text x="72" y="1104" class="pill">DECLARED OR LEGACY / VERIFY BEFORE RELYING ON THESE</text>
+<path d="M74 1140 H128" fill="none" stroke="#8a6870" stroke-width="3" stroke-dasharray="7 6" marker-end="url(#declared)"/>
+<text x="144" y="1147" class="body">HolographicDisplays: declared in qrf-agent; no direct API calls identified.</text>
+<text x="144" y="1184" class="body">SpeechReceiver and the old science-tool event listener: inspected hookup code is commented out.</text>
+<text x="48" y="1271" class="paneltitle">Shared tables are plugin interfaces, even without a direct Java dependency.</text>
+<text x="48" y="1310" class="small">Implemented means present in source, not confirmed enabled on a live server. Optional features need configuration.</text>
+<text x="48" y="1342" class="small">Data arrows assume compatible tables are accessible through the configured database connection.</text>
+<text x="48" y="1374" class="small">Capabilities shown here are grouped; see the full inventory for manifest gaps, build dependencies and validation checks.</text>
+<a href="https://github.com/whimc/qrf-agent/blob/a91628e/docs/contributor-review/relationship-map.md" xlink:href="https://github.com/whimc/qrf-agent/blob/a91628e/docs/contributor-review/relationship-map.md" target="_blank" rel="noopener noreferrer">
+<text x="48" y="1433" class="label">Full relationship inventory and source evidence ↗</text>
+</a>
+<text x="1110" y="1433" class="small">WHIMC • Plugin relationships</text>
+</svg></div>
+<details><summary>Read the relationships as text</summary><ul><li>Science Tools, Observations and Position Tracker write measurements, observations and movement into shared MySQL tables. Student Feedback reads activity and writes progress scores.</li><li>qrf-agent optionally reads learner context and writes agent/dialogue/chat research records. Position-region events are distinct from its position-sample input.</li><li>Citizens supplies NPCs and traits; Journey supplies destinations and accepts navigation commands; WorldGuard supplies regions and POIs; CoreProtect supplies building history; ProtocolLib supports sign input.</li><li>Observations requires DecentHolograms and ProtocolLib. WorldGuard also supports Science Tools and optional Position Tracker region tracking.</li><li>Reference files supply bounded excerpts. A configured hosted or local LLM receives prompts and selected context and returns replies. A local PMML dialogue path also exists.</li><li>Habitat Assesser receives BuildAssessEvent and bridges an external Socket.IO assessment service. Citizens' Mineskin integration can resolve optional HTTPS skin images.</li><li>HolographicDisplays is declared but direct calls were not identified. SpeechReceiver hookup and the old science-tool event listener are commented out.</li></ul><p>Source snapshot: November 18, 2026. Implemented paths may depend on optional configuration; this is not a live deployment inventory. <a href="https://github.com/whimc/qrf-agent/blob/a91628e/docs/contributor-review/relationship-map.md" target="_blank" rel="noopener noreferrer">Read the full relationship inventory and source evidence.</a></p></details>
+</section></body></html>
