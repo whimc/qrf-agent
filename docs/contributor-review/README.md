@@ -6,6 +6,8 @@
 
 Open the [relationship map](relationship-map.md) for the diagrams, integration inventory, source evidence, and suggested checks. The main architectural finding is that **shared database schemas are plugin interfaces too**: qrf-agent can consume science measurements, observations, movement history, and progress without calling those plugins' Java APIs.
 
+For website use, [download or embed the HTML, SVG or PNG map](web/README.md). The HTML includes an expandable text description and needs no external libraries.
+
 The map distinguishes implemented code paths, declared dependencies, and legacy code. It describes the local source snapshot, not the plugins or configuration currently running on a server.
 
 ## Proposed contributor rules in one minute
