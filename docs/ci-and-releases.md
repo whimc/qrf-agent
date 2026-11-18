@@ -2,7 +2,7 @@
 
 Pull requests to `main`, `animal-ai` and `llm-agent`, and pushes to the two development branches, use the CI workflow. A small `changes` job checks the diff and validates the change classifier. Changes limited to `docs/`, root Markdown files, or the license skip the Java build, dependency audit, TruffleHog and CodeQL jobs. Skipped jobs still report a successful/skipped check so documentation PRs do not hang on required checks. Mixed documentation/code changes run the code checks. Markdown under `src/` is packaged content and is treated as code.
 
-Build, workflow and other non-documentation changes still run the code checks. The main ruleset requires the actual GitHub check names: `changes`, `build`, `dependency-audit`, `trufflehog` and `analyze`. The existing human approval rule remains in place.
+Build, workflow and other non-documentation changes still run the code checks. The job names match the existing main ruleset: `CI / build`, `Dependency Audit / dependency-audit`, `TruffleHog / trufflehog` and `CodeQL / analyze`. A failed change-classification job fails these required jobs rather than silently skipping validation. Branch protection and its human approval rule remain unchanged.
 
 Only changes merged/pushed to `main` can publish releases. Release inputs are `src/`, `lib/`, Maven wrappers and `pom.xml`. A change limited to the project's own POM version is a reconciliation change, not a new release. Dependency or build configuration changes in the POM do qualify. Documentation and workflow-only changes do not publish a JAR or increment a release version.
 
