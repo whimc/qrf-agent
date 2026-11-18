@@ -1,23 +1,41 @@
-# Publishes a downloadable JAR to GitHub Releases only.
+# Publishes a downloadable JAR for code changes merged into main only.
 # Minecraft server install is manual — no deploy steps or secrets.
 name: Release
 
 on:
   push:
-    branches: [main, animal-ai]
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'lib/**'
+      - 'pom.xml'
+      - '.mvn/**'
+      - 'mvnw'
+      - 'mvnw.cmd'
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-main
   cancel-in-progress: false
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.scope.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Classify release inputs
+        id: scope
+        run: node .github/scripts/change-scope.cjs
+
   release:
-    # Skip version-bump commits and merges of version-bump PRs to avoid release loops.
-    if: ${{ !contains(github.event.head_commit.message, 'chore(release):') && !contains(github.event.head_commit.message, 'release/bump-') }}
+    needs: changes
+    if: needs.changes.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +48,8 @@ jobs:
           java-version: "21"
           cache: maven
 
-      - name: Bump patch version in pom.xml
+      # Version the release working tree; never push a version-only commit or PR.
+      - name: Set artifact version from published releases
         id: version
         env:
           GH_TOKEN: ${{ github.token }}
@@ -39,7 +58,7 @@ jobs:
           IFS='.' read -r major minor patch <<< "${CURRENT//-SNAPSHOT/}"
           NEW="${major}.${minor}.$((patch + 1))"
 
-          # pom.xml can lag behind tags when release bump PRs merge on main only
+          # Release tags are authoritative after the one-time POM reconciliation.
           while gh release view "v${NEW}" >/dev/null 2>&1; do
             IFS='.' read -r major minor patch <<< "${NEW}"
             NEW="${major}.${minor}.$((patch + 1))"
@@ -67,17 +86,3 @@ jobs:
             --title "v${NEW_VERSION}" \
             --target "${GITHUB_SHA}" \
             --generate-notes
-
-      - name: Open version bump pull request
-        uses: peter-evans/create-pull-request@v7
-        with:
-          branch: release/bump-${{ steps.version.outputs.new }}
-          delete-branch: true
-          title: "chore(release): bump version to ${{ steps.version.outputs.new }}"
-          commit-message: "chore(release): bump version to ${{ steps.version.outputs.new }}"
-          body: |
-            Automated `pom.xml` version bump after publishing [v${{ steps.version.outputs.new }}](https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.new }}).
-
-            Download the JAR from the GitHub Release and install it on the Minecraft server manually.
-          labels: release
-          add-paths: pom.xml

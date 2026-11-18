@@ -11,7 +11,7 @@
 <text x="1110" y="59" class="tiny">Implemented path</text>
 <path d="M1050 85 H1100" fill="none" stroke="#8a6870" stroke-width="3" stroke-dasharray="7 6" marker-end="url(#declared)"/>
 <text x="1110" y="91" class="tiny">Declared / needs verification</text>
-<text x="1050" y="133" class="kicker">DRAFT • SOURCE SNAPSHOT 18 NOV 2026</text>
+<text x="1050" y="133" class="kicker">SOURCE SNAPSHOT 18 NOV 2026</text>
 <rect x="48" y="196" width="450" height="390" rx="18" fill="#ffffff" stroke="#d9e3e8"/>
 <text x="72" y="230" class="kicker">01 / ACTIVITY PRODUCERS</text>
 <text x="72" y="265" class="paneltitle">WHIMC learning activity</text>
@@ -92,5 +92,5 @@
 <a href="https://github.com/whimc/qrf-agent/blob/a91628e/docs/contributor-review/relationship-map.md" xlink:href="https://github.com/whimc/qrf-agent/blob/a91628e/docs/contributor-review/relationship-map.md" target="_blank" rel="noopener noreferrer">
 <text x="48" y="1433" class="label">Full relationship inventory and source evidence ↗</text>
 </a>
-<text x="1110" y="1433" class="small">WHIMC • Review draft</text>
+<text x="1110" y="1433" class="small">WHIMC • Plugin relationships</text>
 </svg>

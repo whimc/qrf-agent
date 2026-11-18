@@ -1,0 +1,60 @@
+digraph WHIMC {
+  graph [rankdir=TB, bgcolor="#ffffff", pad=0.45, nodesep=0.45, ranksep=0.8, splines=spline, fontname="Arial", fontsize=24, fontcolor="#123c75", labelloc=t, label="WHIMC plugin relationships\nSource snapshot · November 18, 2026", compound=true];
+  node [shape=box, style="rounded,filled", fillcolor="#e9f2ff", color="#3572b7", fontcolor="#123c75", fontname="Arial", fontsize=17, margin="0.22,0.16", penwidth=1.4];
+  edge [color="#3572b7", fontcolor="#24568d", fontname="Arial", fontsize=12, arrowsize=0.7, penwidth=1.4];
+
+  subgraph cluster_producers {
+    label="WHIMC activity plugins"; fontsize=18; style="rounded,filled"; fillcolor="#f6faff"; color="#bed4ee";
+    ST [label="Science Tools"];
+    OB [label="Observations"];
+    PT [label="Position Tracker"];
+    SF [label="Student Feedback"];
+    {rank=same; ST; OB; PT; SF;}
+  }
+  DB [shape=cylinder, label="Shared MySQL tables\nmeasurements · observations\npositions · progress", fillcolor="#d8e9ff"];
+  Q [label="qrf-agent\nNPC dialogue · guidance · learner context", fillcolor="#174f94", fontcolor="#ffffff", fontsize=21, penwidth=2];
+  ST -> DB [label="measurements"];
+  OB -> DB [label="observations"];
+  PT -> DB [label="movement + region events"];
+  SF -> DB [label="progress scores"];
+  DB -> SF [label="activity inputs", constraint=false];
+  DB -> Q [label="optional learner context"];
+  Q -> DB [label="research records", constraint=false];
+
+  C [label="Citizens\nNPCs and traits"];
+  WG [label="WorldGuard\nregions and POIs"];
+  CP [label="CoreProtect\nbuilding history"];
+  PL [label="ProtocolLib\npacket-based sign input"];
+  DH [label="DecentHolograms"];
+  REF [label="World prompts\nand reference files"];
+  {rank=same; C; WG; CP; PL; REF;}
+  C -> Q [label="NPC capability"];
+  WG -> Q [label="regions / teams"];
+  CP -> Q [label="history lookup / replay"];
+  PL -> Q [label="text input"];
+  REF -> Q [label="bounded excerpts"];
+  WG -> ST [label="region-aware tools", constraint=false];
+  WG -> PT [label="optional region tracking", constraint=false];
+  DH -> OB [label="required", constraint=false];
+  PL -> OB [label="required", constraint=false];
+
+  J [label="Journey\ndestination catalog + navigation"];
+  L [label="Hosted or local LLM\nconfigured provider"];
+  HA [label="Habitat Assesser"];
+  S [label="External assessment service\nSocket.IO"];
+  HD [label="HolographicDisplays\ndeclared; direct calls unverified", style="rounded,filled,dashed"];
+  SR [label="SpeechReceiver\nlegacy hookup commented out", style="rounded,filled,dashed"];
+  Q -> J [label="waypoint commands"];
+  J -> Q [label="destinations", constraint=false];
+  Q -> L [label="prompt + selected context"];
+  L -> Q [label="reply", constraint=false];
+  Q -> HA [label="BuildAssessEvent"];
+  HA -> S [label="assess request"];
+  S -> HA [label="assessment_response", constraint=false];
+  HD -> Q [label="declared only", style=dashed, constraint=false];
+  SR -> Q [label="legacy", style=dashed, constraint=false];
+  {rank=same; J; L; HA; HD; SR;}
+
+  NOTE [shape=plain, fillcolor="#ffffff", fontsize=14, label="Solid arrows: implemented source paths (may require configuration). Dashed: declared or legacy.\nPosition-region events are separate from qrf-agent's position-sample input.\nFull inventory covers additional build dependencies and compatibility checks."];
+  S -> NOTE [style=invis];
+}

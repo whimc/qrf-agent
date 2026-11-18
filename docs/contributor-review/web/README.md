@@ -1,8 +1,16 @@
 # Website relationship map assets
 
-These assets visualize the [reviewed source inventory](../relationship-map.md). They remain marked as a draft source snapshot, not a live server inventory. The source-evidence link is pinned to documentation commit `a91628e`.
+These assets visualize the [source inventory](../relationship-map.md). Their date marks the inspected source snapshot, not a live server inventory. The source-evidence link is pinned to documentation commit `a91628e`. The underlying policies remain review drafts; the images have no Draft labels.
+
+## Full blue network diagram
+
+`whimc-full-relationships.png` and `whimc-full-relationships.svg` provide the full node-and-arrow network in blue, including the shared data flow, runtime capabilities and external assessment service. `whimc-full-relationships.html` provides a standalone preview. The original Mermaid diagrams remain in the relationship documentation. These blue exports are a separate rendering of the network, rather than the card-based overview below.
+
+For WordPress, use the blue PNG in an Image block and link to the media file. The existing Custom HTML snippet also works: replace both image URLs and change the intrinsic dimensions to those of the blue image (3200 × 1738). Rebuild the blue version with `node build-full-map.cjs --png`; it requires `@viz-js/viz` and, for PNG, `sharp`.
 
 ## Choose a format
+
+**For WordPress:** upload `whimc-qrf-relationships.png` to the Media Library and copy its File URL. Paste `wordpress-embed.html` into a **Custom HTML** block, replacing both `REPLACE_WITH_WORDPRESS_IMAGE_URL` placeholders with that URL. The snippet includes a responsive image, a full-size image link, a caption linking to source evidence, and an expandable text description. It needs no scripts, inline SVG, iframe, plugin or external stylesheet. Preview the published page with your theme. Alternatively, use a normal WordPress Image block and set its link destination to the media file. PNG works with the standard image upload flow; SVG acceptance depends on the site's configuration.
 
 - **`whimc-qrf-relationships.svg`** — scalable image; recommended for a website image block. Intrinsic size: 1600 × 1480.
 - **`whimc-qrf-relationships.png`** — 2400 × 2220 raster image for a CMS that does not accept SVG.

@@ -21,7 +21,7 @@ text(48,108,'How qrf-agent connects to WHIMC','title');
 text(48,148,'Plugins, shared data, runtime capabilities and external services','subtitle');
 line('M1050 53 H1100');text(1110,59,'Implemented path','tiny');
 line('M1050 85 H1100',true);text(1110,91,'Declared / needs verification','tiny');
-text(1050,133,'DRAFT • SOURCE SNAPSHOT 18 NOV 2026','kicker');
+text(1050,133,'SOURCE SNAPSHOT 18 NOV 2026','kicker');
 
 panel(48,196,450,390,'01 / ACTIVITY PRODUCERS','WHIMC learning activity');
 row(72,310,'Science Tools','Measurements and tool use');
@@ -80,7 +80,7 @@ text(48,1342,'Data arrows assume compatible tables are accessible through the co
 text(48,1374,'Capabilities shown here are grouped; see the full inventory for manifest gaps, build dependencies and validation checks.','small');
 parts.push(`<a href="${esc(source)}" xlink:href="${esc(source)}" target="_blank" rel="noopener noreferrer">`);
 text(48,1433,'Full relationship inventory and source evidence ↗','label');parts.push('</a>');
-text(1110,1433,'WHIMC • Review draft','small');
+text(1110,1433,'WHIMC • Plugin relationships','small');
 parts.push('</svg>');
 const svg = parts.join('\n');
 fs.writeFileSync(path.join(out,'whimc-qrf-relationships.svg'),svg);
